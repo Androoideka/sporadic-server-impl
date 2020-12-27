@@ -368,6 +368,7 @@ the errno of the currently running task. */
 
 /* Other file private variables. --------------------------------*/
 PRIVILEGED_DATA static volatile UBaseType_t uxCurrentNumberOfTasks 	= ( UBaseType_t ) 0U;
+PRIVILEGED_DATA static double uxSchedulability                      = 0;
 PRIVILEGED_DATA static volatile TickType_t xTickCount 				= ( TickType_t ) configINITIAL_TICK_COUNT;
 PRIVILEGED_DATA static volatile UBaseType_t uxTopReadyPriority 		= tskIDLE_PRIORITY;
 PRIVILEGED_DATA static volatile BaseType_t xSchedulerRunning 		= pdFALSE;
@@ -562,7 +563,7 @@ static void prvInitialiseNewTask( 	TaskFunction_t pxTaskCode,
  * Called after a new task has been created and initialised to place the task
  * under the control of the scheduler.
  */
-static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
+static BaseType_t prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
 /*
  * Called before the scheduler is initialized so that the periodic tasks
  * are segmented into multiple priority lists.
@@ -814,8 +815,8 @@ static void prvAddTasksToReadyLists( void ) PRIVILEGED_FUNCTION;
 			#endif /* tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE */
 
 			prvInitialiseNewTask( pxTaskCode, pcName, ( uint32_t ) usStackDepth, pvParameters, pxCreatedTask, pxNewTCB, NULL, xPeriod, xComputationTime );
-			prvAddNewTaskToList( pxNewTCB );
-			xReturn = pdPASS;
+			xReturn = prvAddNewTaskToList( pxNewTCB );
+			//xReturn = pdPASS;
 		}
 		else
 		{
@@ -1065,7 +1066,7 @@ UBaseType_t x;
 }
 /*-----------------------------------------------------------*/
 
-static void prvAddNewTaskToList( TCB_t *pxNewTCB )
+static BaseType_t prvAddNewTaskToList( TCB_t *pxNewTCB )
 {
 	/* Ensure interrupts don't access the task lists while the lists are being
 	updated. */
@@ -1078,7 +1079,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 			the suspended state - make this the current task. */
 			pxCurrentTCB = pxNewTCB;
 
-			if( uxCurrentNumberOfTasks == ( UBaseType_t ) 1 )
+			if( uxCurrentNumberOfTasks == ( UBaseType_t ) 1U )
 			{
 				/* This is the first task to be created so do the preliminary
 				initialisation required.  We will not recover if this call
@@ -1122,6 +1123,14 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 		}
 		else
 		{
+			double uxTaskProcUsage = pxNewTCB->xComputationTime / pxNewTCB->xPeriod;
+			uxTaskProcUsage++;
+			if(uxSchedulability * uxTaskProcUsage > 2) {
+				taskEXIT_CRITICAL();
+				return errSCHEDULE_NOT_FEASIBLE;
+			}
+			uxSchedulability *= uxTaskProcUsage;
+
 			// Start by adding all new tasks to the first priority list
 			vListInsertEnd( &( pxReadyTasksLists[ 1 ] ), &( ( pxNewTCB )->xStateListItem ) );
 		}
@@ -1129,6 +1138,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 		portSETUP_TCB( pxNewTCB );
 	}
 	taskEXIT_CRITICAL();
+	return pdPASS;
 }
 /*-----------------------------------------------------------*/
 
@@ -1138,18 +1148,18 @@ static void prvAddTasksToReadyLists( void )
 	TickType_t xMin, xMax, pxMins[configMAX_PRIORITIES];
 	TCB_t *listPointer;
 
-	if(uxListSize < ( UBaseType_t ) 1)
+	if(uxListSize < ( UBaseType_t ) 1U)
 	{
 		return;
 	}
 
-	uxTopReadyPriority = ( UBaseType_t ) 1;
+	uxTopReadyPriority = tskIDLE_PRIORITY + ( UBaseType_t ) 1U;
 	listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
 	listPointer->uxPriority = uxTopReadyPriority;
 	xMin = listPointer->xPeriod;
 	xMax = listPointer->xPeriod;
 
-	for(i = ( UBaseType_t ) 1; i < uxListSize; i++)
+	for(i = ( UBaseType_t ) 1U; i < uxListSize; i++)
 	{
 		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
 		if(listPointer->xPeriod <= xMin)
@@ -1163,16 +1173,16 @@ static void prvAddTasksToReadyLists( void )
 		}
 		else if(listPointer->xPeriod >= xMax)
 		{
-			listPointer->uxPriority = ( UBaseType_t ) 1;
+			listPointer->uxPriority = ( UBaseType_t ) 1U;
 			if(listPointer->xPeriod > xMax)
 			{
 				UBaseType_t j;
 				TCB_t *updateListPointer = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ 1 ] ) );
-				for(j = ( UBaseType_t ) 1; j < uxTopReadyPriority; j++)
+				for(j = ( UBaseType_t ) 1U; j < uxTopReadyPriority; j++)
 				{
 					pxMins[j] = portMAX_DELAY;
 				}
-				for(j = ( UBaseType_t ) 0; j < i; j++)
+				for(j = ( UBaseType_t ) 0U; j < i; j++)
 				{
 					updateListPointer->uxPriority = updateListPointer->uxPriority + 1;
 					if(updateListPointer->xPeriod < pxMins[updateListPointer->uxPriority])
@@ -1186,9 +1196,9 @@ static void prvAddTasksToReadyLists( void )
 			else
 			{
 				UBaseType_t j;
-				for(j = ( UBaseType_t ) 2; j < uxTopReadyPriority; j++)
+				for(j = ( UBaseType_t ) 2U; j < uxTopReadyPriority; j++)
 				{
-					listPointer->uxPriority = j - ( UBaseType_t ) 1;
+					listPointer->uxPriority = j - ( UBaseType_t ) 1U;
 					if(listPointer->xPeriod > pxMins[j])
 					{
 						//listPointer->uxPriority = j - ( UBaseType_t ) 1;
@@ -1200,11 +1210,11 @@ static void prvAddTasksToReadyLists( void )
 		}
 
 	}
-	uxTopReadyPriority = ( UBaseType_t ) 0;
-	for(i = ( UBaseType_t ) 0; i < uxListSize; i++)
+	uxTopReadyPriority = tskIDLE_PRIORITY;
+	for(i = ( UBaseType_t ) 0U; i < uxListSize; i++)
 	{
 		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
-		if(listPointer->uxPriority != ( UBaseType_t ) 1)
+		if(listPointer->uxPriority != ( UBaseType_t ) 1U)
 		{
 			uxListRemove( &( listPointer->xStateListItem ) );
 			prvAddTaskToReadyList( listPointer );
