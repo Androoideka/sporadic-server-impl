@@ -39,15 +39,15 @@
  *----------------------------------------------------------*/
 
 #define configUSE_PREEMPTION					1
-#define configUSE_PORT_OPTIMISED_TASK_SELECTION	1
-#define configUSE_IDLE_HOOK						1
-#define configUSE_TICK_HOOK						1
-#define configUSE_DAEMON_TASK_STARTUP_HOOK		1
+#define configUSE_PORT_OPTIMISED_TASK_SELECTION	0
+#define configUSE_IDLE_HOOK						0
+#define configUSE_TICK_HOOK						0
+#define configUSE_DAEMON_TASK_STARTUP_HOOK		0
 #define configTICK_RATE_HZ						( 1000 ) /* In this non-real time simulated environment the tick frequency has to be at least a multiple of the Win32 tick frequency, and therefore very slow. */
 #define configMINIMAL_STACK_SIZE				( ( unsigned short ) 70 ) /* In this simulated case, the stack only has to hold one small structure as the real stack is part of the win32 thread. */
 #define configTOTAL_HEAP_SIZE					( ( size_t ) ( 65 * 1024 ) )
 #define configMAX_TASK_NAME_LEN					( 12 )
-#define configUSE_TRACE_FACILITY				1
+#define configUSE_TRACE_FACILITY				0
 #define configUSE_16_BIT_TICKS					0
 #define configIDLE_SHOULD_YIELD					1
 #define configUSE_MUTEXES						1
@@ -59,18 +59,18 @@
 #define configUSE_ALTERNATIVE_API				0
 #define configUSE_QUEUE_SETS					1
 #define configUSE_TASK_NOTIFICATIONS			1
-#define configSUPPORT_STATIC_ALLOCATION			1
+#define configSUPPORT_STATIC_ALLOCATION			0
 
 /* Software timer related configuration options.  The maximum possible task
 priority is configMAX_PRIORITIES - 1.  The priority of the timer task is
 deliberately set higher to ensure it is correctly capped back to
 configMAX_PRIORITIES - 1. */
-#define configUSE_TIMERS						1
+#define configUSE_TIMERS						0
 #define configTIMER_TASK_PRIORITY				( configMAX_PRIORITIES - 1 )
 #define configTIMER_QUEUE_LENGTH				20
 #define configTIMER_TASK_STACK_DEPTH			( configMINIMAL_STACK_SIZE * 2 )
 
-#define configMAX_PRIORITIES					( 7 )
+#define configMAX_PRIORITIES					( 3 )
 
 /* Run time stats gathering configuration options. */
 unsigned long ulGetRunTimeCounterValue( void ); /* Prototype of function that returns run time counter. */
@@ -111,7 +111,7 @@ functions anyway. */
 #define INCLUDE_xTaskGetHandle					1
 #define INCLUDE_eTaskGetState					1
 #define INCLUDE_xSemaphoreGetMutexHolder		1
-#define INCLUDE_xTimerPendFunctionCall			1
+#define INCLUDE_xTimerPendFunctionCall			0
 #define INCLUDE_xTaskAbortDelay					1
 
 #define configINCLUDE_MESSAGE_BUFFER_AMP_DEMO	0
@@ -135,7 +135,7 @@ used with multiple project configurations.  If it is
 	#define mtCOVERAGE_TEST_MARKER() __asm volatile( "NOP" )
 
 	/* Ensure the tick count overflows during the coverage test. */
-	#define configINITIAL_TICK_COUNT 0xffffd800UL
+	#define configINITIAL_TICK_COUNT 0x0UL
 
 	/* Allows tests of trying to allocate more than the heap has free. */
 	#define configUSE_MALLOC_FAILED_HOOK			0

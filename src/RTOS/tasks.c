@@ -28,6 +28,7 @@
 /* Standard includes. */
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* Defining MPU_WRAPPERS_INCLUDED_FROM_API_FILE prevents task.h from redefining
 all the API functions to use the MPU wrappers.  That should only be done when
@@ -68,7 +69,6 @@ functions but without including stdio.h here. */
 #define taskNOT_WAITING_NOTIFICATION	( ( uint8_t ) 0 )
 #define taskWAITING_NOTIFICATION		( ( uint8_t ) 1 )
 #define taskNOTIFICATION_RECEIVED		( ( uint8_t ) 2 )
-
 /*
  * The value used to fill the stack of a task when the task is created.  This
  * is used purely for checking the high water mark for tasks.
@@ -323,6 +323,9 @@ typedef struct tskTaskControlBlock 			/* The old naming convention is used to pr
 		int iTaskErrno;
 	#endif
 
+	TickType_t xPeriod; /*< Number of ticks after which the task repeats itself. */
+	TickType_t xComputationTime; /*< Worst case running time of a single instance of the task. */
+
 } tskTCB;
 
 /* The old tskTCB name is maintained above then typedefed to the new TCB_t name
@@ -549,16 +552,22 @@ static void prvInitialiseNewTask( 	TaskFunction_t pxTaskCode,
 									const char * const pcName, 		/*lint !e971 Unqualified char types are allowed for strings and single characters only. */
 									const uint32_t ulStackDepth,
 									void * const pvParameters,
-									UBaseType_t uxPriority,
 									TaskHandle_t * const pxCreatedTask,
 									TCB_t *pxNewTCB,
-									const MemoryRegion_t * const xRegions ) PRIVILEGED_FUNCTION;
+									const MemoryRegion_t * const xRegions,
+									TickType_t xPeriod,
+									TickType_t xComputationTime ) PRIVILEGED_FUNCTION;
 
 /*
  * Called after a new task has been created and initialised to place the task
  * under the control of the scheduler.
  */
-static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
+static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
+/*
+ * Called before the scheduler is initialized so that the periodic tasks
+ * are segmented into multiple priority lists.
+ */
+static void prvAddTasksToReadyLists( void ) PRIVILEGED_FUNCTION;
 
 /*
  * freertos_tasks_c_additions_init() should only be called if the user definable
@@ -731,8 +740,9 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
 							const char * const pcName,		/*lint !e971 Unqualified char types are allowed for strings and single characters only. */
 							const configSTACK_DEPTH_TYPE usStackDepth,
 							void * const pvParameters,
-							UBaseType_t uxPriority,
-							TaskHandle_t * const pxCreatedTask )
+							TaskHandle_t * const pxCreatedTask,
+							TickType_t xPeriod,
+							TickType_t xComputationTime)
 	{
 	TCB_t *pxNewTCB;
 	BaseType_t xReturn;
@@ -803,8 +813,8 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
 			}
 			#endif /* tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE */
 
-			prvInitialiseNewTask( pxTaskCode, pcName, ( uint32_t ) usStackDepth, pvParameters, uxPriority, pxCreatedTask, pxNewTCB, NULL );
-			prvAddNewTaskToReadyList( pxNewTCB );
+			prvInitialiseNewTask( pxTaskCode, pcName, ( uint32_t ) usStackDepth, pvParameters, pxCreatedTask, pxNewTCB, NULL, xPeriod, xComputationTime );
+			prvAddNewTaskToList( pxNewTCB );
 			xReturn = pdPASS;
 		}
 		else
@@ -822,10 +832,11 @@ static void prvInitialiseNewTask( 	TaskFunction_t pxTaskCode,
 									const char * const pcName,		/*lint !e971 Unqualified char types are allowed for strings and single characters only. */
 									const uint32_t ulStackDepth,
 									void * const pvParameters,
-									UBaseType_t uxPriority,
 									TaskHandle_t * const pxCreatedTask,
 									TCB_t *pxNewTCB,
-									const MemoryRegion_t * const xRegions )
+									const MemoryRegion_t * const xRegions,
+									TickType_t xPeriod,
+									TickType_t xComputationTime)
 {
 StackType_t *pxTopOfStack;
 UBaseType_t x;
@@ -916,21 +927,10 @@ UBaseType_t x;
 		pxNewTCB->pcTaskName[ 0 ] = 0x00;
 	}
 
-	/* This is used as an array index so must ensure it's not too large.  First
-	remove the privilege bit if one is present. */
-	if( uxPriority >= ( UBaseType_t ) configMAX_PRIORITIES )
-	{
-		uxPriority = ( UBaseType_t ) configMAX_PRIORITIES - ( UBaseType_t ) 1U;
-	}
-	else
-	{
-		mtCOVERAGE_TEST_MARKER();
-	}
-
-	pxNewTCB->uxPriority = uxPriority;
+	pxNewTCB->xPeriod = xPeriod;
+	pxNewTCB->xComputationTime = xComputationTime;
 	#if ( configUSE_MUTEXES == 1 )
 	{
-		pxNewTCB->uxBasePriority = uxPriority;
 		pxNewTCB->uxMutexesHeld = 0;
 	}
 	#endif /* configUSE_MUTEXES */
@@ -941,10 +941,6 @@ UBaseType_t x;
 	/* Set the pxNewTCB as a link back from the ListItem_t.  This is so we can get
 	back to	the containing TCB from a generic item in a list. */
 	listSET_LIST_ITEM_OWNER( &( pxNewTCB->xStateListItem ), pxNewTCB );
-
-	/* Event lists are always in priority order. */
-	listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
-	listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
 
 	#if ( portCRITICAL_NESTING_IN_TCB == 1 )
 	{
@@ -1069,7 +1065,7 @@ UBaseType_t x;
 }
 /*-----------------------------------------------------------*/
 
-static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
+static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 {
 	/* Ensure interrupts don't access the task lists while the lists are being
 	updated. */
@@ -1096,24 +1092,7 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 		}
 		else
 		{
-			/* If the scheduler is not already running, make this task the
-			current task if it is the highest priority task to be created
-			so far. */
-			if( xSchedulerRunning == pdFALSE )
-			{
-				if( pxCurrentTCB->uxPriority <= pxNewTCB->uxPriority )
-				{
-					pxCurrentTCB = pxNewTCB;
-				}
-				else
-				{
-					mtCOVERAGE_TEST_MARKER();
-				}
-			}
-			else
-			{
-				mtCOVERAGE_TEST_MARKER();
-			}
+			mtCOVERAGE_TEST_MARKER();
 		}
 
 		uxTaskNumber++;
@@ -1126,29 +1105,121 @@ static void prvAddNewTaskToReadyList( TCB_t *pxNewTCB )
 		#endif /* configUSE_TRACE_FACILITY */
 		traceTASK_CREATE( pxNewTCB );
 
-		prvAddTaskToReadyList( pxNewTCB );
+		if (pxNewTCB->pcTaskName != NULL && strcmp(pxNewTCB->pcTaskName, configIDLE_TASK_NAME) == 0)
+		{
+			pxNewTCB->uxPriority = portPRIVILEGE_BIT; /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
+			#if ( configUSE_MUTEXES == 1 )
+			{
+				pxNewTCB->uxBasePriority = pxNewTCB->uxPriority;
+			}
+			#endif
+			/* Event lists are always in priority order. */
+			listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) pxNewTCB->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
+			listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
+
+			// Add idle task to list 0 since it will be alone
+			prvAddTaskToReadyList( pxNewTCB );
+		}
+		else
+		{
+			// Start by adding all new tasks to the first priority list
+			vListInsertEnd( &( pxReadyTasksLists[ 1 ] ), &( ( pxNewTCB )->xStateListItem ) );
+		}
 
 		portSETUP_TCB( pxNewTCB );
 	}
 	taskEXIT_CRITICAL();
+}
+/*-----------------------------------------------------------*/
 
-	if( xSchedulerRunning != pdFALSE )
+static void prvAddTasksToReadyLists( void )
+{
+	UBaseType_t i, uxListSize = listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ 1 ] ) );
+	TickType_t xMin, xMax, pxMins[configMAX_PRIORITIES];
+	TCB_t *listPointer;
+
+	if(uxListSize < ( UBaseType_t ) 1)
 	{
-		/* If the created task is of a higher priority than the current task
-		then it should run now. */
-		if( pxCurrentTCB->uxPriority < pxNewTCB->uxPriority )
-		{
-			taskYIELD_IF_USING_PREEMPTION();
-		}
-		else
-		{
-			mtCOVERAGE_TEST_MARKER();
-		}
+		return;
 	}
-	else
+
+	uxTopReadyPriority = ( UBaseType_t ) 1;
+	listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
+	listPointer->uxPriority = uxTopReadyPriority;
+	xMin = listPointer->xPeriod;
+	xMax = listPointer->xPeriod;
+
+	for(i = ( UBaseType_t ) 1; i < uxListSize; i++)
 	{
-		mtCOVERAGE_TEST_MARKER();
+		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
+		if(listPointer->xPeriod <= xMin)
+		{
+			xMin = listPointer->xPeriod;
+			if(uxTopReadyPriority < configMAX_PRIORITIES && listPointer->xPeriod < xMin)
+			{
+				++uxTopReadyPriority;
+			}
+			listPointer->uxPriority = uxTopReadyPriority;
+		}
+		else if(listPointer->xPeriod >= xMax)
+		{
+			listPointer->uxPriority = ( UBaseType_t ) 1;
+			if(listPointer->xPeriod > xMax)
+			{
+				UBaseType_t j;
+				TCB_t *updateListPointer = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ 1 ] ) );
+				for(j = ( UBaseType_t ) 1; j < uxTopReadyPriority; j++)
+				{
+					pxMins[j] = portMAX_DELAY;
+				}
+				for(j = ( UBaseType_t ) 0; j < i; j++)
+				{
+					updateListPointer->uxPriority = updateListPointer->uxPriority + 1;
+					if(updateListPointer->xPeriod < pxMins[updateListPointer->uxPriority])
+					{
+						pxMins[updateListPointer->uxPriority] = updateListPointer->xPeriod;
+					}
+					ListItem_t *pxNext = listGET_NEXT( &( updateListPointer->xStateListItem ) );
+					updateListPointer = listGET_LIST_ITEM_OWNER( pxNext );
+				}
+			}
+			else
+			{
+				UBaseType_t j;
+				for(j = ( UBaseType_t ) 2; j < uxTopReadyPriority; j++)
+				{
+					listPointer->uxPriority = j - ( UBaseType_t ) 1;
+					if(listPointer->xPeriod > pxMins[j])
+					{
+						//listPointer->uxPriority = j - ( UBaseType_t ) 1;
+						break;
+					}
+				}
+			}
+			xMax = listPointer->xPeriod;
+		}
+
 	}
+	uxTopReadyPriority = ( UBaseType_t ) 0;
+	for(i = ( UBaseType_t ) 0; i < uxListSize; i++)
+	{
+		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
+		if(listPointer->uxPriority != ( UBaseType_t ) 1)
+		{
+			uxListRemove( &( listPointer->xStateListItem ) );
+			prvAddTaskToReadyList( listPointer );
+		}
+
+		#if ( configUSE_MUTEXES == 1 )
+		{
+			listPointer->uxBasePriority = listPointer->uxPriority;
+		}
+		#endif
+		/* Event lists are always in priority order. */
+		listSET_LIST_ITEM_VALUE( &( listPointer->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) listPointer->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
+		listSET_LIST_ITEM_OWNER( &( listPointer->xEventListItem ), listPointer );
+	}
+
 }
 /*-----------------------------------------------------------*/
 
@@ -1968,6 +2039,8 @@ void vTaskStartScheduler( void )
 {
 BaseType_t xReturn;
 
+	prvAddTasksToReadyLists();
+	fflush(stdout);
 	/* Add the idle task at the lowest priority. */
 	#if( configSUPPORT_STATIC_ALLOCATION == 1 )
 	{
@@ -2002,8 +2075,9 @@ BaseType_t xReturn;
 								configIDLE_TASK_NAME,
 								configMINIMAL_STACK_SIZE,
 								( void * ) NULL,
-								portPRIVILEGE_BIT, /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
-								&xIdleTaskHandle ); /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+								&xIdleTaskHandle,
+								portMAX_DELAY, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+								( TickType_t ) 0);
 	}
 	#endif /* configSUPPORT_STATIC_ALLOCATION */
 
@@ -2997,6 +3071,7 @@ void vTaskSwitchContext( void )
 		/* Select a new task to run using either the generic C or port
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
+
 		traceTASK_SWITCHED_IN();
 
 		/* After the new task is switched in, update the global errno. */
