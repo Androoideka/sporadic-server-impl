@@ -323,7 +323,11 @@ typedef struct tskTaskControlBlock 			/* The old naming convention is used to pr
 		int iTaskErrno;
 	#endif
 
-	TickType_t xPeriod; /*< Number of ticks after which the task repeats itself. */
+	TaskFunction_t pxTaskCode; /*< Function to call using this task. */
+	void * pvParameters; /*< Parameters to pass to the function the task is calling. */
+
+	TickType_t xArrivalTime; /*< Number of ticks after which the task starts. If the task is periodic, this value is used to designate the last waking time. */
+	TickType_t xPeriod; /*< Number of ticks after which the task repeats itself. If the task is periodic, this must be 0. */
 	TickType_t xComputationTime; /*< Worst case running time of a single instance of the task. */
 
 } tskTCB;
@@ -556,6 +560,7 @@ static void prvInitialiseNewTask( 	TaskFunction_t pxTaskCode,
 									TaskHandle_t * const pxCreatedTask,
 									TCB_t *pxNewTCB,
 									const MemoryRegion_t * const xRegions,
+									TickType_t xArrivalTime,
 									TickType_t xPeriod,
 									TickType_t xComputationTime ) PRIVILEGED_FUNCTION;
 
@@ -742,6 +747,7 @@ static void prvAddTasksToReadyLists( void ) PRIVILEGED_FUNCTION;
 							const configSTACK_DEPTH_TYPE usStackDepth,
 							void * const pvParameters,
 							TaskHandle_t * const pxCreatedTask,
+							TickType_t xArrivalTime,
 							TickType_t xPeriod,
 							TickType_t xComputationTime)
 	{
@@ -814,9 +820,8 @@ static void prvAddTasksToReadyLists( void ) PRIVILEGED_FUNCTION;
 			}
 			#endif /* tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE */
 
-			prvInitialiseNewTask( pxTaskCode, pcName, ( uint32_t ) usStackDepth, pvParameters, pxCreatedTask, pxNewTCB, NULL, xPeriod, xComputationTime );
+			prvInitialiseNewTask( pxTaskCode, pcName, ( uint32_t ) usStackDepth, pvParameters, pxCreatedTask, pxNewTCB, NULL, xArrivalTime, xPeriod, xComputationTime );
 			xReturn = prvAddNewTaskToList( pxNewTCB );
-			//xReturn = pdPASS;
 		}
 		else
 		{
@@ -836,6 +841,7 @@ static void prvInitialiseNewTask( 	TaskFunction_t pxTaskCode,
 									TaskHandle_t * const pxCreatedTask,
 									TCB_t *pxNewTCB,
 									const MemoryRegion_t * const xRegions,
+									TickType_t xArrivalTime,
 									TickType_t xPeriod,
 									TickType_t xComputationTime)
 {
@@ -928,6 +934,9 @@ UBaseType_t x;
 		pxNewTCB->pcTaskName[ 0 ] = 0x00;
 	}
 
+	pxNewTCB->pxTaskCode = pxTaskCode;
+	pxNewTCB->pvParameters = pvParameters;
+	pxNewTCB->xArrivalTime = xArrivalTime;
 	pxNewTCB->xPeriod = xPeriod;
 	pxNewTCB->xComputationTime = xComputationTime;
 	#if ( configUSE_MUTEXES == 1 )
@@ -1233,6 +1242,17 @@ static void prvAddTasksToReadyLists( void )
 }
 /*-----------------------------------------------------------*/
 
+static void prvResetTask( TCB_t *pxTCB )
+{
+	//printf("%d %d\n", pxTCB->pxStack, pxTCB->pxTopOfStack);
+	//#if( tskSET_NEW_STACKS_TO_KNOWN_VALUE == 1 )
+	//{
+		/* Fill the stack with a known value to assist debugging. */
+		//( void ) memset( pxTCB->pxStack, ( int ) tskSTACK_FILL_BYTE, ( size_t ) ulStackDepth * sizeof( StackType_t ) );
+	//}
+	pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
+}
+
 #if ( INCLUDE_vTaskDelete == 1 )
 
 	void vTaskDelete( TaskHandle_t xTaskToDelete )
@@ -1244,6 +1264,15 @@ static void prvAddTasksToReadyLists( void )
 			/* If null is passed in here then it is the calling task that is
 			being deleted. */
 			pxTCB = prvGetTCBFromHandle( xTaskToDelete );
+
+			if( xTaskToDelete == NULL && pxTCB->xPeriod > 0 )
+			{
+				taskEXIT_CRITICAL();
+				//prvResetTask( pxTCB );
+				vTaskDelayUntil( &( pxTCB->xArrivalTime ), pxTCB->xPeriod );
+				//prvResetTask( pxTCB );
+				return;
+			}
 
 			/* Remove task from the ready list. */
 			if( uxListRemove( &( pxTCB->xStateListItem ) ) == ( UBaseType_t ) 0 )
@@ -2050,7 +2079,6 @@ void vTaskStartScheduler( void )
 BaseType_t xReturn;
 
 	prvAddTasksToReadyLists();
-	fflush(stdout);
 	/* Add the idle task at the lowest priority. */
 	#if( configSUPPORT_STATIC_ALLOCATION == 1 )
 	{
@@ -2086,6 +2114,7 @@ BaseType_t xReturn;
 								configMINIMAL_STACK_SIZE,
 								( void * ) NULL,
 								&xIdleTaskHandle,
+								( TickType_t ) 0,
 								portMAX_DELAY, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
 								( TickType_t ) 0);
 	}
@@ -2831,6 +2860,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 						mtCOVERAGE_TEST_MARKER();
 					}
 
+					//prvResetTask( pxTCB );
 					/* Place the unblocked task into the appropriate ready
 					list. */
 					prvAddTaskToReadyList( pxTCB );
