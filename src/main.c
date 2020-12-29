@@ -230,8 +230,8 @@ void input_handler(FILE *file) {
 
 int main( void )
 {
-	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 5, 1);
-	xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 10, 1);
+	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
+	xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
 
 	vTaskStartScheduler();
 
