@@ -71,7 +71,7 @@ configMAX_PRIORITIES - 1. */
 #define configTIMER_QUEUE_LENGTH				20
 #define configTIMER_TASK_STACK_DEPTH			( configMINIMAL_STACK_SIZE * 2 )
 
-#define configMAX_PRIORITIES					( 3 )
+#define configMAX_PRIORITIES					( 7 )
 
 /* Run time stats gathering configuration options. */
 unsigned long ulGetRunTimeCounterValue( void ); /* Prototype of function that returns run time counter. */

@@ -307,13 +307,14 @@ is used in assert() statements. */
  void vOtherFunction( void )
  {
  static uint8_t ucParameterToPass;
+ TickType_t xArrivalTime, xPeriod, xComputationTime;
  TaskHandle_t xHandle = NULL;
 
 	 // Create the task, storing the handle.  Note that the passed parameter ucParameterToPass
 	 // must exist for the lifetime of the task, so in this case is declared static.  If it was just an
 	 // an automatic stack variable it might no longer exist, or at least have been corrupted, by the time
 	 // the new task attempts to access it.
-	 xTaskCreate( vTaskCode, "NAME", STACK_SIZE, &ucParameterToPass, tskIDLE_PRIORITY, &xHandle );
+	 xTaskCreate( vTaskCode, "NAME", STACK_SIZE, &ucParameterToPass, tskIDLE_PRIORITY, &xHandle, xArrivalTime, xPeriod, xComputationTime );
      configASSERT( xHandle );
 
 	 // Use the handle to delete the task.
@@ -336,6 +337,66 @@ is used in assert() statements. */
 							TickType_t xPeriod,
 							TickType_t xComputationTime ) PRIVILEGED_FUNCTION;
 #endif
+/**
+ * task. h
+ *<pre>
+ BaseType_t xDistributeBatch( void );</pre>
+ *
+ * Distribute the tasks that have been added since the last call to xDistributeBatch.
+ *
+ * Internally, within the FreeRTOS implementation, tasks use two blocks of
+ * memory.  The first block is used to hold the task's data structures.  The
+ * second block is used by the task as its stack.  If a task is created using
+ * xTaskCreate() then both blocks of memory are automatically dynamically
+ * allocated inside the xTaskCreate() function.  (see
+ * http://www.freertos.org/a00111.html).  If a task is created using
+ * xTaskCreateStatic() then the application writer must provide the required
+ * memory.  xTaskCreateStatic() therefore allows a task to be created without
+ * using any dynamic memory allocation.
+ *
+ * @return If the submitted batch is not schedulable, errSCHEDULE_NOT_FEASIBLE is returned.
+ * Otherwise the periodic tasks are distributed into ready lists and aperiodic tasks
+ * are sorted into their own list by arrival time. pdPASS is returned.
+ *
+ * Example usage:
+   <pre>
+ // Task to be created.
+ void vTaskCode( void * pvParameters )
+ {
+	 for( ;; )
+	 {
+		 // Task code goes here.
+	 }
+ }
+
+ // Function that creates a task.
+ void vOtherFunction( void )
+ {
+ static uint8_t ucParameterToPass;
+ TickType_t xArrivalTime, xPeriod, xComputationTime;
+ TaskHandle_t xHandle = NULL;
+
+	 // Create the task, storing the handle.  Note that the passed parameter ucParameterToPass
+	 // must exist for the lifetime of the task, so in this case is declared static.  If it was just an
+	 // an automatic stack variable it might no longer exist, or at least have been corrupted, by the time
+	 // the new task attempts to access it.
+	 xTaskCreate( vTaskCode, "NAME", STACK_SIZE, &ucParameterToPass, tskIDLE_PRIORITY, &xHandle, xArrivalTime, xPeriod, xComputationTime );
+     configASSERT( xHandle );
+
+     // Call distribute batch to commit the new task into the schedule.
+     xDistributeBatch();
+
+	 // Use the handle to delete the task.
+     if( xHandle != NULL )
+     {
+	     vTaskDelete( xHandle );
+     }
+ }
+   </pre>
+ * \defgroup xDistributeBatch xDistributeBatch
+ * \ingroup Tasks
+ */
+BaseType_t xDistributeBatch( void ) PRIVILEGED_FUNCTION;
 
 /**
  * task. h

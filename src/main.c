@@ -11,7 +11,8 @@
 #define commADDPD     ( BaseType_t ) 1
 #define commADDAPD    ( BaseType_t ) 2
 #define commREMOV     ( BaseType_t ) 3
-#define commSINIT     ( BaseType_t ) 4
+#define commBATCH     ( BaseType_t ) 4
+#define commSINIT     ( BaseType_t ) 5
 
 #define COMMAND_SIZE        17
 #define FUNC_NAME_SIZE      17
@@ -101,6 +102,8 @@ static void exception_handler(BaseType_t xError)
 {
 	if(xError == pdPASS)
 		return;
+	if(xError == errSCHEDULER_RUNNING)
+		printf("Cannot add periodic tasks while scheduler is running.");
 	if(xError == errSCHEDULE_NOT_FEASIBLE)
 		printf("Schedule was not feasible with new additions.\n");
 	if(xError == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY)
@@ -146,6 +149,8 @@ void input_handler(FILE *file) {
 			xCommand = commADDAPD;
 		else if(strcmp(pcCommand, "remove_task") == 0)
 			xCommand = commREMOV;
+		else if(strcmp(pcCommand, "commit_batch") == 0)
+			xCommand = commBATCH;
 		else if(strcmp(pcCommand, "initialize_server") == 0)
 			xCommand = commSINIT;
 		else
@@ -220,6 +225,10 @@ void input_handler(FILE *file) {
 				// We'll call a remove task method from task.h here
 			}
 		}
+		else if(xCommand == commBATCH)
+		{
+			xError = xDistributeBatch();
+		}
 		else if(xCommand == commSINIT)
 		{
 			// We'll initialize a server here (work in progress
@@ -232,6 +241,7 @@ int main( void )
 {
 	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
 	xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
+	exception_handler(xDistributeBatch());
 
 	vTaskStartScheduler();
 

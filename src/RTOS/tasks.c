@@ -213,12 +213,12 @@ count overflows. */
 
 /*
  * Place the task represented by pxTCB into the appropriate ready list for
- * the task.  It is inserted at the end of the list.
+ * the task.
  */
 #define prvAddTaskToReadyList( pxTCB )																\
 	traceMOVED_TASK_TO_READY_STATE( pxTCB );														\
 	taskRECORD_READY_PRIORITY( ( pxTCB )->uxPriority );												\
-	vListInsertEnd( &( pxReadyTasksLists[ ( pxTCB )->uxPriority ] ), &( ( pxTCB )->xStateListItem ) ); \
+	vListInsert( &( pxReadyTasksLists[ ( pxTCB )->uxPriority ] ), &( ( pxTCB )->xStateListItem ) ); \
 	tracePOST_MOVED_TASK_TO_READY_STATE( pxTCB )
 /*-----------------------------------------------------------*/
 
@@ -353,6 +353,9 @@ PRIVILEGED_DATA static List_t * volatile pxDelayedTaskList;				/*< Points to the
 PRIVILEGED_DATA static List_t * volatile pxOverflowDelayedTaskList;		/*< Points to the delayed task list currently being used to hold tasks that have overflowed the current tick count. */
 PRIVILEGED_DATA static List_t xPendingReadyList;						/*< Tasks that have been readied while the scheduler was suspended.  They will be moved to the ready list when the scheduler is resumed. */
 
+PRIVILEGED_DATA static List_t xAperiodicTasksList;                      /*< Aperiodic tasks that are currently ready. Aperiodic tasks share the other lists with periodic ones. */
+PRIVILEGED_DATA static List_t xBatchedTasksList;                        /*< List of tasks that are to be added. */
+
 #if( INCLUDE_vTaskDelete == 1 )
 
 	PRIVILEGED_DATA static List_t xTasksWaitingTermination;				/*< Tasks that have been deleted - but their memory not yet freed. */
@@ -374,7 +377,7 @@ the errno of the currently running task. */
 
 /* Other file private variables. --------------------------------*/
 PRIVILEGED_DATA static volatile UBaseType_t uxCurrentNumberOfTasks 	= ( UBaseType_t ) 0U;
-PRIVILEGED_DATA static double uxSchedulability                      = 0;
+PRIVILEGED_DATA static double ufSchedulability                      = 0;
 PRIVILEGED_DATA static volatile TickType_t xTickCount 				= ( TickType_t ) configINITIAL_TICK_COUNT;
 PRIVILEGED_DATA static volatile UBaseType_t uxTopReadyPriority 		= tskIDLE_PRIORITY;
 PRIVILEGED_DATA static volatile BaseType_t xSchedulerRunning 		= pdFALSE;
@@ -570,12 +573,7 @@ static void prvInitialiseNewTask( 	TaskFunction_t pxTaskCode,
  * Called after a new task has been created and initialised to place the task
  * under the control of the scheduler.
  */
-static BaseType_t prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
-/*
- * Called before the scheduler is initialized so that the periodic tasks
- * are segmented into multiple priority lists.
- */
-static void prvAddTasksToReadyLists( void ) PRIVILEGED_FUNCTION;
+static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
 
 /*
  * freertos_tasks_c_additions_init() should only be called if the user definable
@@ -756,6 +754,10 @@ static void prvAddTasksToReadyLists( void ) PRIVILEGED_FUNCTION;
 	TCB_t *pxNewTCB;
 	BaseType_t xReturn;
 
+		if(xPeriod > ( TickType_t ) 0 && xSchedulerRunning != pdFALSE)
+		{
+			return errSCHEDULER_RUNNING;
+		}
 		/* If the stack grows down then allocate the stack then the TCB so the stack
 		does not grow into the TCB.  Likewise if the stack grows up then allocate
 		the TCB then the stack. */
@@ -823,7 +825,8 @@ static void prvAddTasksToReadyLists( void ) PRIVILEGED_FUNCTION;
 			#endif /* tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE */
 
 			prvInitialiseNewTask( pxTaskCode, pcName, ( uint32_t ) usStackDepth, pvParameters, pxCreatedTask, pxNewTCB, NULL, xArrivalTime, xPeriod, xComputationTime );
-			xReturn = prvAddNewTaskToList( pxNewTCB );
+			prvAddNewTaskToList( pxNewTCB );
+			xReturn = pdPASS;
 		}
 		else
 		{
@@ -1079,7 +1082,7 @@ UBaseType_t x;
 }
 /*-----------------------------------------------------------*/
 
-static BaseType_t prvAddNewTaskToList( TCB_t *pxNewTCB )
+static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 {
 	/* Ensure interrupts don't access the task lists while the lists are being
 	updated. */
@@ -1136,101 +1139,137 @@ static BaseType_t prvAddNewTaskToList( TCB_t *pxNewTCB )
 		}
 		else
 		{
-			double uxTaskProcUsage = pxNewTCB->xComputationTime / pxNewTCB->xPeriod;
-			uxTaskProcUsage++;
-			if(uxSchedulability * uxTaskProcUsage > 2) {
-				taskEXIT_CRITICAL();
-				return errSCHEDULE_NOT_FEASIBLE;
-			}
-			uxSchedulability *= uxTaskProcUsage;
-
-			// Start by adding all new tasks to the first priority list
-			vListInsertEnd( &( pxReadyTasksLists[ 1 ] ), &( ( pxNewTCB )->xStateListItem ) );
+			/* Pend tasks for the next batch order. */
+			vListInsertEnd( &xBatchedTasksList, &( ( pxNewTCB )->xStateListItem ) );
 		}
 
 		portSETUP_TCB( pxNewTCB );
 	}
 	taskEXIT_CRITICAL();
-	return pdPASS;
 }
 /*-----------------------------------------------------------*/
 
-static void prvAddTasksToReadyLists( void )
+BaseType_t xDistributeBatch( void )
 {
-	UBaseType_t i, uxListSize = listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ 1 ] ) );
-	TickType_t xMin, xMax, pxMins[configMAX_PRIORITIES];
-	TCB_t *listPointer;
+UBaseType_t i, uxTopPriority, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
+TickType_t xMin, xMax, pxMins[configMAX_PRIORITIES];
+TCB_t *listPointer;
+double ufTaskProcUsage;
 
-	if(uxListSize < ( UBaseType_t ) 1U)
+	if(uxBatchSize < ( UBaseType_t ) 1U)
 	{
-		return;
+		return errQUEUE_EMPTY;
 	}
 
-	uxTopReadyPriority = tskIDLE_PRIORITY + ( UBaseType_t ) 1U;
-	listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
-	listPointer->uxPriority = uxTopReadyPriority;
+	for(i = ( UBaseType_t ) 1U; i < configMAX_PRIORITIES; i++)
+	{
+		UBaseType_t uxListSize = listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ i ] ) );
+		if( uxListSize < ( UBaseType_t ) 1U )
+		{
+			break;
+		}
+		TickType_t xPeriod = listGET_ITEM_VALUE_OF_HEAD_ENTRY( &( pxReadyTasksLists[ i ] ) );
+		pxMins[ i ] = xPeriod;
+		if( xMin == 0 || xPeriod < xMin )
+		{
+			xMin = xPeriod;
+		}
+		else if( xMax == 0 || xPeriod > xMax )
+		{
+			xMax = xPeriod;
+		}
+	}
+
+	uxTopPriority = tskIDLE_PRIORITY + ( UBaseType_t ) 1U;
+	listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
+	listPointer->uxPriority = uxTopPriority;
 	xMin = listPointer->xPeriod;
 	xMax = listPointer->xPeriod;
-
-	for(i = ( UBaseType_t ) 1U; i < uxListSize; i++)
-	{
-		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
-		if(listPointer->xPeriod <= xMin)
-		{
-			xMin = listPointer->xPeriod;
-			if(uxTopReadyPriority < configMAX_PRIORITIES && listPointer->xPeriod < xMin)
-			{
-				++uxTopReadyPriority;
-			}
-			listPointer->uxPriority = uxTopReadyPriority;
-		}
-		else if(listPointer->xPeriod >= xMax)
-		{
-			listPointer->uxPriority = ( UBaseType_t ) 1U;
-			if(listPointer->xPeriod > xMax)
-			{
-				UBaseType_t j;
-				TCB_t *updateListPointer = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ 1 ] ) );
-				for(j = ( UBaseType_t ) 1U; j < uxTopReadyPriority; j++)
-				{
-					pxMins[j] = portMAX_DELAY;
-				}
-				for(j = ( UBaseType_t ) 0U; j < i; j++)
-				{
-					updateListPointer->uxPriority = updateListPointer->uxPriority + 1;
-					if(updateListPointer->xPeriod < pxMins[updateListPointer->uxPriority])
-					{
-						pxMins[updateListPointer->uxPriority] = updateListPointer->xPeriod;
-					}
-					ListItem_t *pxNext = listGET_NEXT( &( updateListPointer->xStateListItem ) );
-					updateListPointer = listGET_LIST_ITEM_OWNER( pxNext );
-				}
-			}
-			else
-			{
-				UBaseType_t j;
-				for(j = ( UBaseType_t ) 2U; j < uxTopReadyPriority; j++)
-				{
-					listPointer->uxPriority = j - ( UBaseType_t ) 1U;
-					if(listPointer->xPeriod > pxMins[j])
-					{
-						//listPointer->uxPriority = j - ( UBaseType_t ) 1;
-						break;
-					}
-				}
-			}
-			xMax = listPointer->xPeriod;
-		}
-
+	ufTaskProcUsage = listPointer->xComputationTime / listPointer->xPeriod;
+	ufTaskProcUsage++;
+	if(ufSchedulability * ufTaskProcUsage > 2) {
+		return errSCHEDULE_NOT_FEASIBLE;
 	}
-	uxTopReadyPriority = tskIDLE_PRIORITY;
-	for(i = ( UBaseType_t ) 0U; i < uxListSize; i++)
+	ufSchedulability *= ufTaskProcUsage;
+
+	for(i = ( UBaseType_t ) 1U; i < uxBatchSize; i++)
 	{
-		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &( pxReadyTasksLists[ 1 ] ) );
-		if(listPointer->uxPriority != ( UBaseType_t ) 1U)
+		listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
+		if(listPointer->xPeriod == 0)
 		{
-			uxListRemove( &( listPointer->xStateListItem ) );
+			listPointer->uxPriority = tskIDLE_PRIORITY;
+			listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
+		}
+		else
+		{
+			ufTaskProcUsage = listPointer->xComputationTime / listPointer->xPeriod;
+			ufTaskProcUsage++;
+			if(ufSchedulability * ufTaskProcUsage > 2) {
+				return errSCHEDULE_NOT_FEASIBLE;
+			}
+			ufSchedulability *= ufTaskProcUsage;
+			listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xPeriod );
+			if(listPointer->xPeriod <= xMin)
+			{
+				xMin = listPointer->xPeriod;
+				if(uxTopPriority < configMAX_PRIORITIES && listPointer->xPeriod < xMin)
+				{
+					++uxTopPriority;
+				}
+				listPointer->uxPriority = uxTopPriority;
+			}
+			else if(listPointer->xPeriod >= xMax)
+			{
+				listPointer->uxPriority = ( UBaseType_t ) 1U;
+				if(listPointer->xPeriod > xMax)
+				{
+					UBaseType_t j;
+					TCB_t *updateListPointer = listGET_OWNER_OF_HEAD_ENTRY( &xBatchedTasksList );
+					for(j = ( UBaseType_t ) 1U; j < uxTopPriority; j++)
+					{
+						pxMins[j] = portMAX_DELAY;
+					}
+					for(j = ( UBaseType_t ) 0U; j < i; j++)
+					{
+						updateListPointer->uxPriority = updateListPointer->uxPriority + 1;
+						if(updateListPointer->xPeriod < pxMins[updateListPointer->uxPriority])
+						{
+							pxMins[updateListPointer->uxPriority] = updateListPointer->xPeriod;
+						}
+						ListItem_t *pxNext = listGET_NEXT( &( updateListPointer->xStateListItem ) );
+						updateListPointer = listGET_LIST_ITEM_OWNER( pxNext );
+					}
+				}
+				else
+				{
+					UBaseType_t j;
+					for(j = ( UBaseType_t ) 2U; j < uxTopPriority; j++)
+					{
+						listPointer->uxPriority = j - ( UBaseType_t ) 1U;
+						if(listPointer->xPeriod > pxMins[j])
+						{
+							//listPointer->uxPriority = j - ( UBaseType_t ) 1;
+							break;
+						}
+					}
+				}
+				xMax = listPointer->xPeriod;
+			}
+		}
+	}
+	for(i = ( UBaseType_t ) 0U; i < uxBatchSize; i++)
+	{
+		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &xBatchedTasksList );
+		uxListRemove( &( ( listPointer )->xStateListItem ) );
+		if(listPointer->uxPriority != tskIDLE_PRIORITY)
+		{
 			prvAddTaskToReadyList( listPointer );
+		}
+		else
+		{
+			/* Put aperiodic tasks in their own list. */
+			vListInsert( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
+			//vListInsertEnd( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
 		}
 
 		#if ( configUSE_MUTEXES == 1 )
@@ -1242,7 +1281,7 @@ static void prvAddTasksToReadyLists( void )
 		listSET_LIST_ITEM_VALUE( &( listPointer->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) listPointer->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
 		listSET_LIST_ITEM_OWNER( &( listPointer->xEventListItem ), listPointer );
 	}
-
+	return pdPASS;
 }
 /*-----------------------------------------------------------*/
 
@@ -2078,7 +2117,6 @@ void vTaskStartScheduler( void )
 {
 BaseType_t xReturn;
 
-	prvAddTasksToReadyLists();
 	/* Add the idle task at the lowest priority. */
 	#if( configSUPPORT_STATIC_ALLOCATION == 1 )
 	{
@@ -2868,9 +2906,20 @@ BaseType_t xSwitchRequired = pdFALSE;
 						prvResetTask( pxTCB );
 					}
 
-					/* Place the unblocked task into the appropriate ready
-					list. */
-					prvAddTaskToReadyList( pxTCB );
+					/* Set the period as the list item to sort by if the task is periodic
+					and the arrival time if the task is aperiodic. */
+					if( pxTCB->xPeriod == 0 )
+					{
+						listSET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ), pxTCB->xArrivalTime );
+						vListInsert( &xAperiodicTasksList, &( ( pxTCB )->xStateListItem ) );
+					}
+					else
+					{
+						listSET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ), pxTCB->xPeriod );
+						/* Place the unblocked task into the appropriate ready
+						list. */
+						prvAddTaskToReadyList( pxTCB );
+					}
 
 					/* A task being unblocked cannot cause an immediate
 					context switch if preemption is turned off. */
@@ -3677,6 +3726,8 @@ UBaseType_t uxPriority;
 	vListInitialise( &xDelayedTaskList1 );
 	vListInitialise( &xDelayedTaskList2 );
 	vListInitialise( &xPendingReadyList );
+	vListInitialise( &xBatchedTasksList );
+	vListInitialise( &xAperiodicTasksList );
 
 	#if ( INCLUDE_vTaskDelete == 1 )
 	{
