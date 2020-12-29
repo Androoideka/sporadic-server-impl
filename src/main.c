@@ -231,7 +231,18 @@ void input_handler(FILE *file) {
 		}
 		else if(xCommand == commSINIT)
 		{
-			// We'll initialize a server here (work in progress
+			int xPeriod;
+			int xCapacity;
+
+			// We'll initialize a server here (work in progress)
+			if(fscanf(file, "%d %d", &xPeriod, &xCapacity) != 2)
+			{
+				xError = errMISSINGPARAM;
+			}
+			else
+			{
+				xError = xSetServer(xPeriod, xCapacity);
+			}
 		}
 		exception_handler(xError);
 	}

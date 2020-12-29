@@ -112,6 +112,12 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 	#define configIDLE_TASK_NAME "IDLE"
 #endif
 
+/* The name allocated to the Server task.  This can be overridden by defining
+configSERVER_TASK_NAME in FreeRTOSConfig.h. */
+#ifndef configSERVER_TASK_NAME
+	#define configSERVER_TASK_NAME "SERVER"
+#endif
+
 #if ( configUSE_PORT_OPTIMISED_TASK_SELECTION == 0 )
 
 	/* If configUSE_PORT_OPTIMISED_TASK_SELECTION is 0 then task selection is
@@ -387,6 +393,7 @@ PRIVILEGED_DATA static volatile BaseType_t xNumOfOverflows 			= ( BaseType_t ) 0
 PRIVILEGED_DATA static UBaseType_t uxTaskNumber 					= ( UBaseType_t ) 0U;
 PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime		= ( TickType_t ) 0U; /* Initialised to portMAX_DELAY before the scheduler starts. */
 PRIVILEGED_DATA static TaskHandle_t xIdleTaskHandle					= NULL;			/*< Holds the handle of the idle task.  The idle task is created automatically when the scheduler is started. */
+PRIVILEGED_DATA static TaskHandle_t xServerTaskHandle				= NULL;			/*< Holds the handle of the server task. */
 
 /* Context switches are held pending while the scheduler is suspended.  Also,
 interrupts must not manipulate the xStateListItem of a TCB, or any of the
@@ -1152,7 +1159,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 BaseType_t xDistributeBatch( void )
 {
 UBaseType_t i, uxTopPriority, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
-TickType_t xMin, xMax, pxMins[configMAX_PRIORITIES];
+TickType_t xMin = ( TickType_t ) 0, xMax = ( TickType_t ) 0, pxMins[configMAX_PRIORITIES];
 TCB_t *listPointer;
 double ufTaskProcUsage;
 
@@ -1170,11 +1177,11 @@ double ufTaskProcUsage;
 		}
 		TickType_t xPeriod = listGET_ITEM_VALUE_OF_HEAD_ENTRY( &( pxReadyTasksLists[ i ] ) );
 		pxMins[ i ] = xPeriod;
-		if( xMin == 0 || xPeriod < xMin )
+		if( xMin == ( TickType_t ) 0 || xPeriod < xMin )
 		{
 			xMin = xPeriod;
 		}
-		else if( xMax == 0 || xPeriod > xMax )
+		else if( xMax == ( TickType_t ) 0 || xPeriod > xMax )
 		{
 			xMax = xPeriod;
 		}
@@ -1195,7 +1202,7 @@ double ufTaskProcUsage;
 	for(i = ( UBaseType_t ) 1U; i < uxBatchSize; i++)
 	{
 		listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
-		if(listPointer->xPeriod == 0)
+		if(listPointer->xPeriod == ( TickType_t ) 0)
 		{
 			listPointer->uxPriority = tskIDLE_PRIORITY;
 			listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
@@ -1269,7 +1276,6 @@ double ufTaskProcUsage;
 		{
 			/* Put aperiodic tasks in their own list. */
 			vListInsert( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
-			//vListInsertEnd( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
 		}
 
 		#if ( configUSE_MUTEXES == 1 )
@@ -1302,7 +1308,7 @@ static void prvResetTask( TCB_t *pxTCB )
 
 		/* If a periodic task is deleting itself then that means it
 		expects to be reinitialized. */
-		if( xTaskToDelete == NULL && pxTCB->xPeriod > 0 )
+		if( xTaskToDelete == NULL && pxTCB->xPeriod > ( TickType_t ) 0 )
 		{
 			pxTCB->xStackInitRequired = 1;
 			vTaskDelayUntil( &( pxTCB->xArrivalTime ), pxTCB->xPeriod );
@@ -2113,6 +2119,32 @@ static void prvResetTask( TCB_t *pxTCB )
 #endif /* ( ( INCLUDE_xTaskResumeFromISR == 1 ) && ( INCLUDE_vTaskSuspend == 1 ) ) */
 /*-----------------------------------------------------------*/
 
+BaseType_t xSetServer(TickType_t xPeriod, TickType_t xCapacity)
+{
+BaseType_t xReturn;
+
+	// schedulability check
+	if( xServerTaskHandle == NULL )
+	{
+		xReturn = xTaskCreate(	prvIdleTask,
+								configSERVER_TASK_NAME,
+								configMINIMAL_STACK_SIZE,
+								( void * ) NULL,
+								&xServerTaskHandle,
+								( TickType_t ) 0,
+								xPeriod, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+								xCapacity);
+	}
+	else
+	{
+		TCB_t pxTCB = prvGetTCBFromHandle( xServerTaskHandle );
+		pxTCB->xPeriod = xPeriod;
+		pxTCB->xComputationTime = xCapacity;
+	}
+	return xReturn;
+}
+/*-----------------------------------------------------------*/
+
 void vTaskStartScheduler( void )
 {
 BaseType_t xReturn;
@@ -2908,7 +2940,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 
 					/* Set the period as the list item to sort by if the task is periodic
 					and the arrival time if the task is aperiodic. */
-					if( pxTCB->xPeriod == 0 )
+					if( pxTCB->xPeriod == ( TickType_t ) 0 )
 					{
 						listSET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ), pxTCB->xArrivalTime );
 						vListInsert( &xAperiodicTasksList, &( ( pxTCB )->xStateListItem ) );

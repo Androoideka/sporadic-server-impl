@@ -401,6 +401,32 @@ BaseType_t xDistributeBatch( void ) PRIVILEGED_FUNCTION;
 /**
  * task. h
  *<pre>
+ BaseType_t xDistributeBatch( void );</pre>
+ *
+ * Set the parameters of the server.
+ *
+ * @return If the submitted server is not schedulable, errSCHEDULE_NOT_FEASIBLE is returned.
+ * Otherwise the server is created if not initialized prior, and its values are set to
+ * the given parameters.
+ *
+ * Example usage:
+   <pre>
+ // Function that initializes the server.
+ TickType_t xPeriod, xCapacity;
+ void vOtherFunction( void )
+ {
+	 // Initializes the server with the given parameters.
+	 xSetServer(xPeriod, xCapacity);
+ }
+   </pre>
+ * \defgroup xSetServer xSetServer
+ * \ingroup Tasks
+ */
+BaseType_t xSetServer(TickType_t xPeriod, TickType_t xCapacity) PRIVILEGED_FUNCTION;
+
+/**
+ * task. h
+ *<pre>
  TaskHandle_t xTaskCreateStatic( TaskFunction_t pvTaskCode,
 								 const char * const pcName,
 								 uint32_t ulStackDepth,
