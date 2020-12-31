@@ -393,7 +393,9 @@ PRIVILEGED_DATA static volatile BaseType_t xNumOfOverflows 			= ( BaseType_t ) 0
 PRIVILEGED_DATA static UBaseType_t uxTaskNumber 					= ( UBaseType_t ) 0U;
 PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime		= ( TickType_t ) 0U; /* Initialised to portMAX_DELAY before the scheduler starts. */
 PRIVILEGED_DATA static TaskHandle_t xIdleTaskHandle					= NULL;			/*< Holds the handle of the idle task.  The idle task is created automatically when the scheduler is started. */
-PRIVILEGED_DATA static TaskHandle_t xServerTaskHandle				= NULL;			/*< Holds the handle of the server task. */
+
+PRIVILEGED_DATA static TickType_t xServerCapacity                   = 0;
+PRIVILEGED_DATA static TickType_t xServerPeriod                     = 0;
 
 /* Context switches are held pending while the scheduler is suspended.  Also,
 interrupts must not manipulate the xStateListItem of a TCB, or any of the
@@ -2121,27 +2123,17 @@ static void prvResetTask( TCB_t *pxTCB )
 
 BaseType_t xSetServer(TickType_t xPeriod, TickType_t xCapacity)
 {
-BaseType_t xReturn;
 
-	// schedulability check
-	if( xServerTaskHandle == NULL )
-	{
-		xReturn = xTaskCreate(	prvIdleTask,
-								configSERVER_TASK_NAME,
-								configMINIMAL_STACK_SIZE,
-								( void * ) NULL,
-								&xServerTaskHandle,
-								( TickType_t ) 0,
-								xPeriod, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
-								xCapacity);
+	if(xSchedulerRunning != pdFALSE) {
+		return errSCHEDULER_RUNNING;
 	}
-	else
-	{
-		TCB_t pxTCB = prvGetTCBFromHandle( xServerTaskHandle );
-		pxTCB->xPeriod = xPeriod;
-		pxTCB->xComputationTime = xCapacity;
+	// schedulability check needs to be done differently
+	if(ufSchedulability > 2) {
+		return errSCHEDULE_NOT_FEASIBLE;
 	}
-	return xReturn;
+	xServerPeriod = xPeriod;
+	xServerCapacity = xCapacity;
+	return pdPASS;
 }
 /*-----------------------------------------------------------*/
 

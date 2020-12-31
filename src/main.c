@@ -242,6 +242,9 @@ void input_handler(FILE *file) {
 			else
 			{
 				xError = xSetServer(xPeriod, xCapacity);
+				if(xError == pdPASS) {
+					return;
+				}
 			}
 		}
 		exception_handler(xError);
