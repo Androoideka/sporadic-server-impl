@@ -108,6 +108,8 @@ static void exception_handler(BaseType_t xError)
 		printf("Schedule was not feasible with new additions.\n");
 	if(xError == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY)
 		printf("Couldn't allocate required memory.\n");
+	if(xError == errNOT_CALLABLE)
+		printf("This function should only be called after the scheduler is started. SetServer will handle batch distribution before that point.");
 	if(xError == errINVALIDCOMMAND)
 		printf("Your command wasn't recognized.\n");
 	if(xError == errMISSINGPARAM)
@@ -243,6 +245,7 @@ void input_handler(FILE *file) {
 			{
 				xError = xSetServer(xPeriod, xCapacity);
 				if(xError == pdPASS) {
+					vTaskStartScheduler();
 					return;
 				}
 			}
@@ -255,9 +258,11 @@ int main( void )
 {
 	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
 	xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
-	exception_handler(xDistributeBatch());
 
-	vTaskStartScheduler();
+	BaseType_t xError = xSetServer(5, 2);
+	if(xError == pdPASS) {
+		vTaskStartScheduler();
+	}
 
 	return 0;
 

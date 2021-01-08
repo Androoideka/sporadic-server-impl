@@ -349,7 +349,7 @@ which static variables must be declared volatile. */
 PRIVILEGED_DATA TCB_t * volatile pxCurrentTCB = NULL;
 
 /* Lists for ready and blocked tasks. --------------------
-xDelayedTaskList1 and xDelayedTaskList2 could be move to function scople but
+xDelayedTaskList1 and xDelayedTaskList2 could be move to function scope but
 doing so breaks some kernel aware debuggers and debuggers that rely on removing
 the static qualifier. */
 PRIVILEGED_DATA static List_t pxReadyTasksLists[ configMAX_PRIORITIES ];/*< Prioritised ready tasks. */
@@ -361,6 +361,29 @@ PRIVILEGED_DATA static List_t xPendingReadyList;						/*< Tasks that have been r
 
 PRIVILEGED_DATA static List_t xAperiodicTasksList;                      /*< Aperiodic tasks that are currently ready. Aperiodic tasks share the other lists with periodic ones. */
 PRIVILEGED_DATA static List_t xBatchedTasksList;                        /*< List of tasks that are to be added. */
+
+typedef struct srvCapacityRefill
+{
+	ListItem_t xReleaseListItem;
+	TickType_t xCapacity;
+} SCR_t;
+
+// Why a queue? Because it's designed for smallish structs like the capacity filler
+// Capacity refilling is FIFO because a capacity refill queued later
+// will never unblock earlier than a capacity refill queued earlier
+// No malloc needed because the queue copies rather than using a reference
+// And there is a maximum amount of refills queued at one time,
+// which is period of server divided by 2 rounded up.
+PRIVILEGED_DATA static List_t xRefillQueue;
+PRIVILEGED_DATA static List_t xAvailableRefills;
+// This is the designated struct that will be modified while the server is active
+// Once the server stops being active, the struct will be sent to the queue
+PRIVILEGED_DATA static SCR_t * xRefill;
+// This value will change but will always get refilled to its initial state
+PRIVILEGED_DATA static TickType_t xServerCapacity = ( TickType_t ) 0U;
+// This value will stay static after initialization and will be used to calculate
+// the release tick in the capacity refill struct
+PRIVILEGED_DATA static TickType_t xServerPeriod = ( TickType_t ) 0U;
 
 #if( INCLUDE_vTaskDelete == 1 )
 
@@ -393,9 +416,6 @@ PRIVILEGED_DATA static volatile BaseType_t xNumOfOverflows 			= ( BaseType_t ) 0
 PRIVILEGED_DATA static UBaseType_t uxTaskNumber 					= ( UBaseType_t ) 0U;
 PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime		= ( TickType_t ) 0U; /* Initialised to portMAX_DELAY before the scheduler starts. */
 PRIVILEGED_DATA static TaskHandle_t xIdleTaskHandle					= NULL;			/*< Holds the handle of the idle task.  The idle task is created automatically when the scheduler is started. */
-
-PRIVILEGED_DATA static TickType_t xServerCapacity                   = 0;
-PRIVILEGED_DATA static TickType_t xServerPeriod                     = 0;
 
 /* Context switches are held pending while the scheduler is suspended.  Also,
 interrupts must not manipulate the xStateListItem of a TCB, or any of the
@@ -583,6 +603,12 @@ static void prvInitialiseNewTask( 	TaskFunction_t pxTaskCode,
  * under the control of the scheduler.
  */
 static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
+
+/*
+ * Called to check schedulability of a batch and to allocate every
+ * periodic task to a ready list.
+ */
+static BaseType_t xPrepareBatch ( void ) PRIVILEGED_FUNCTION;
 
 /*
  * freertos_tasks_c_additions_init() should only be called if the user definable
@@ -951,6 +977,7 @@ UBaseType_t x;
 	pxNewTCB->pxTaskCode = pxTaskCode;
 	pxNewTCB->pvParameters = pvParameters;
 	pxNewTCB->xStackInitRequired = 0;
+	pxNewTCB->uxPriority = tskIDLE_PRIORITY;
 	pxNewTCB->xArrivalTime = xArrivalTime;
 	pxNewTCB->xPeriod = xPeriod;
 	pxNewTCB->xComputationTime = xComputationTime;
@@ -1093,76 +1120,77 @@ UBaseType_t x;
 
 static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 {
-	/* Ensure interrupts don't access the task lists while the lists are being
-	updated. */
-	taskENTER_CRITICAL();
+	/* This will be called while the scheduler is inactive for periodic tasks and the idle task,
+	and will be called for aperiodic tasks while the scheduler is running.
+	Only the batch list is referenced so there are no interrupts concerns. */
+	uxCurrentNumberOfTasks++;
+	if( pxCurrentTCB == NULL )
 	{
-		uxCurrentNumberOfTasks++;
-		if( pxCurrentTCB == NULL )
+		/* There are no other tasks, or all the other tasks are in
+		the suspended state - make this the current task. */
+		if ( pxNewTCB->xPeriod > (TickType_t) 0 )
 		{
-			/* There are no other tasks, or all the other tasks are in
-			the suspended state - make this the current task. */
 			pxCurrentTCB = pxNewTCB;
+		}
 
-			if( uxCurrentNumberOfTasks == ( UBaseType_t ) 1U )
-			{
-				/* This is the first task to be created so do the preliminary
-				initialisation required.  We will not recover if this call
-				fails, but we will report the failure. */
-				prvInitialiseTaskLists();
-			}
-			else
-			{
-				mtCOVERAGE_TEST_MARKER();
-			}
+		if( uxCurrentNumberOfTasks == ( UBaseType_t ) 1U )
+		{
+			/* This is the first task to be created so do the preliminary
+			initialisation required.  We will not recover if this call
+			fails, but we will report the failure. */
+			prvInitialiseTaskLists();
 		}
 		else
 		{
 			mtCOVERAGE_TEST_MARKER();
 		}
-
-		uxTaskNumber++;
-
-		#if ( configUSE_TRACE_FACILITY == 1 )
-		{
-			/* Add a counter into the TCB for tracing only. */
-			pxNewTCB->uxTCBNumber = uxTaskNumber;
-		}
-		#endif /* configUSE_TRACE_FACILITY */
-		traceTASK_CREATE( pxNewTCB );
-
-		if (pxNewTCB->pcTaskName != NULL && strcmp(pxNewTCB->pcTaskName, configIDLE_TASK_NAME) == 0)
-		{
-			pxNewTCB->uxPriority = portPRIVILEGE_BIT; /* In effect ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), but tskIDLE_PRIORITY is zero. */
-			#if ( configUSE_MUTEXES == 1 )
-			{
-				pxNewTCB->uxBasePriority = pxNewTCB->uxPriority;
-			}
-			#endif
-			/* Event lists are always in priority order. */
-			listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) pxNewTCB->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
-			listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
-
-			// Add idle task to list 0 since it will be alone
-			prvAddTaskToReadyList( pxNewTCB );
-		}
-		else
-		{
-			/* Pend tasks for the next batch order. */
-			vListInsertEnd( &xBatchedTasksList, &( ( pxNewTCB )->xStateListItem ) );
-		}
-
-		portSETUP_TCB( pxNewTCB );
 	}
-	taskEXIT_CRITICAL();
+	else
+	{
+		mtCOVERAGE_TEST_MARKER();
+	}
+
+	uxTaskNumber++;
+
+	#if ( configUSE_TRACE_FACILITY == 1 )
+	{
+		/* Add a counter into the TCB for tracing only. */
+		pxNewTCB->uxTCBNumber = uxTaskNumber;
+	}
+	#endif /* configUSE_TRACE_FACILITY */
+	traceTASK_CREATE( pxNewTCB );
+
+	if (pxNewTCB->pcTaskName != NULL && strcmp(pxNewTCB->pcTaskName, configIDLE_TASK_NAME) == 0)
+	{
+		pxNewTCB->uxPriority = pxNewTCB->uxPriority | portPRIVILEGE_BIT;
+		#if ( configUSE_MUTEXES == 1 )
+		{
+			pxNewTCB->uxBasePriority = pxNewTCB->uxPriority;
+		}
+		#endif
+		/* Event lists are always in priority order. */
+		listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) pxNewTCB->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
+		listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
+
+		// Add idle task to list 0 since it will be alone
+		prvAddTaskToReadyList( pxNewTCB );
+	}
+	else
+	{
+		/* Pend tasks for the next batch order. */
+		vListInsertEnd( &xBatchedTasksList, &( ( pxNewTCB )->xStateListItem ) );
+	}
+
+	portSETUP_TCB( pxNewTCB );
 }
 /*-----------------------------------------------------------*/
 
-BaseType_t xDistributeBatch( void )
+static BaseType_t xPrepareBatch( void )
 {
-UBaseType_t i, uxTopPriority, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
-TickType_t xMin = ( TickType_t ) 0, xMax = ( TickType_t ) 0, pxMins[configMAX_PRIORITIES];
+UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
 TCB_t *listPointer;
+TickType_t xMin = portMAX_DELAY, xMax = ( TickType_t ) 0U, pxMins[configMAX_PRIORITIES];
+UBaseType_t uxTopPriority = uxTopReadyPriority;
 double ufTaskProcUsage;
 
 	if(uxBatchSize < ( UBaseType_t ) 1U)
@@ -1170,44 +1198,12 @@ double ufTaskProcUsage;
 		return errQUEUE_EMPTY;
 	}
 
-	for(i = ( UBaseType_t ) 1U; i < configMAX_PRIORITIES; i++)
-	{
-		UBaseType_t uxListSize = listCURRENT_LIST_LENGTH( &( pxReadyTasksLists[ i ] ) );
-		if( uxListSize < ( UBaseType_t ) 1U )
-		{
-			break;
-		}
-		TickType_t xPeriod = listGET_ITEM_VALUE_OF_HEAD_ENTRY( &( pxReadyTasksLists[ i ] ) );
-		pxMins[ i ] = xPeriod;
-		if( xMin == ( TickType_t ) 0 || xPeriod < xMin )
-		{
-			xMin = xPeriod;
-		}
-		else if( xMax == ( TickType_t ) 0 || xPeriod > xMax )
-		{
-			xMax = xPeriod;
-		}
-	}
-
-	uxTopPriority = tskIDLE_PRIORITY + ( UBaseType_t ) 1U;
-	listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
-	listPointer->uxPriority = uxTopPriority;
-	xMin = listPointer->xPeriod;
-	xMax = listPointer->xPeriod;
-	ufTaskProcUsage = listPointer->xComputationTime / listPointer->xPeriod;
-	ufTaskProcUsage++;
-	if(ufSchedulability * ufTaskProcUsage > 2) {
-		return errSCHEDULE_NOT_FEASIBLE;
-	}
-	ufSchedulability *= ufTaskProcUsage;
-
-	for(i = ( UBaseType_t ) 1U; i < uxBatchSize; i++)
+	for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
 	{
 		listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
-		if(listPointer->xPeriod == ( TickType_t ) 0)
+		if( listPointer->xPeriod == ( TickType_t ) 0 )
 		{
-			listPointer->uxPriority = tskIDLE_PRIORITY;
-			listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
+			continue;
 		}
 		else
 		{
@@ -1217,68 +1213,88 @@ double ufTaskProcUsage;
 				return errSCHEDULE_NOT_FEASIBLE;
 			}
 			ufSchedulability *= ufTaskProcUsage;
+
 			listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xPeriod );
-			if(listPointer->xPeriod <= xMin)
+			if( listPointer->xPeriod <= xMin )
 			{
-				xMin = listPointer->xPeriod;
-				if(uxTopPriority < configMAX_PRIORITIES && listPointer->xPeriod < xMin)
+				if( uxTopPriority < configMAX_PRIORITIES && listPointer->xPeriod < xMin)
 				{
 					++uxTopPriority;
 				}
 				listPointer->uxPriority = uxTopPriority;
+				xMin = listPointer->xPeriod;
 			}
-			else if(listPointer->xPeriod >= xMax)
+			else if( listPointer->xPeriod >= xMax )
 			{
-				listPointer->uxPriority = ( UBaseType_t ) 1U;
-				if(listPointer->xPeriod > xMax)
+				if( listPointer->xPeriod > xMax )
 				{
 					UBaseType_t j;
 					TCB_t *updateListPointer = listGET_OWNER_OF_HEAD_ENTRY( &xBatchedTasksList );
-					for(j = ( UBaseType_t ) 1U; j < uxTopPriority; j++)
+					for( j = ( UBaseType_t ) 1U; j < uxTopPriority; j++ )
 					{
 						pxMins[j] = portMAX_DELAY;
 					}
-					for(j = ( UBaseType_t ) 0U; j < i; j++)
+					for( j = ( UBaseType_t ) 0U; j < i; j++ )
 					{
-						updateListPointer->uxPriority = updateListPointer->uxPriority + 1;
-						if(updateListPointer->xPeriod < pxMins[updateListPointer->uxPriority])
+						if( updateListPointer->uxPriority < configMAX_PRIORITIES )
 						{
-							pxMins[updateListPointer->uxPriority] = updateListPointer->xPeriod;
+							updateListPointer->uxPriority = updateListPointer->uxPriority + ( UBaseType_t ) 1U;
+						}
+						if( updateListPointer->xPeriod < pxMins[ updateListPointer->uxPriority ] )
+						{
+							pxMins[ updateListPointer->uxPriority ] = updateListPointer->xPeriod;
 						}
 						ListItem_t *pxNext = listGET_NEXT( &( updateListPointer->xStateListItem ) );
 						updateListPointer = listGET_LIST_ITEM_OWNER( pxNext );
 					}
 				}
-				else
-				{
-					UBaseType_t j;
-					for(j = ( UBaseType_t ) 2U; j < uxTopPriority; j++)
-					{
-						listPointer->uxPriority = j - ( UBaseType_t ) 1U;
-						if(listPointer->xPeriod > pxMins[j])
-						{
-							//listPointer->uxPriority = j - ( UBaseType_t ) 1;
-							break;
-						}
-					}
-				}
+				listPointer->uxPriority = ( UBaseType_t ) 1U;
 				xMax = listPointer->xPeriod;
 			}
+			else
+			{
+				UBaseType_t j;
+				for( j = ( UBaseType_t ) 2U; j < uxTopPriority; j++ )
+				{
+					listPointer->uxPriority = j - ( UBaseType_t ) 1U;
+					if( listPointer->xPeriod > pxMins[ j ] )
+					{
+						break;
+					}
+				}
+			}
 		}
+		printf("Task: %u %u\n", listPointer->uxPriority, listPointer->xPeriod);
 	}
-	for(i = ( UBaseType_t ) 0U; i < uxBatchSize; i++)
+
+	return pdPASS;
+}
+/*-----------------------------------------------------------*/
+
+BaseType_t xDistributeBatch( void )
+{
+UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
+TCB_t *listPointer;
+
+	if( xSchedulerRunning == pdFALSE )
+	{
+		return errNOT_CALLABLE;
+	}
+
+	if( uxBatchSize < ( UBaseType_t ) 1U )
+	{
+		return errQUEUE_EMPTY;
+	}
+
+	for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
 	{
 		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &xBatchedTasksList );
 		uxListRemove( &( ( listPointer )->xStateListItem ) );
-		if(listPointer->uxPriority != tskIDLE_PRIORITY)
-		{
-			prvAddTaskToReadyList( listPointer );
-		}
-		else
-		{
-			/* Put aperiodic tasks in their own list. */
-			vListInsert( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
-		}
+
+		// TO-DO: Overflows are not properly covered by this. Needs fixing.
+		/* Put aperiodic tasks in their own list, sorted by arrival time. */
+		listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
+		vListInsert( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
 
 		#if ( configUSE_MUTEXES == 1 )
 		{
@@ -1289,6 +1305,7 @@ double ufTaskProcUsage;
 		listSET_LIST_ITEM_VALUE( &( listPointer->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) listPointer->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
 		listSET_LIST_ITEM_OWNER( &( listPointer->xEventListItem ), listPointer );
 	}
+
 	return pdPASS;
 }
 /*-----------------------------------------------------------*/
@@ -2127,13 +2144,23 @@ BaseType_t xSetServer(TickType_t xPeriod, TickType_t xCapacity)
 	if(xSchedulerRunning != pdFALSE) {
 		return errSCHEDULER_RUNNING;
 	}
+
+	BaseType_t xReturn = xPrepareBatch();
+
+	if( xReturn != pdPASS )
+	{
+		return xReturn;
+	}
+
 	// schedulability check needs to be done differently
 	if(ufSchedulability > 2) {
 		return errSCHEDULE_NOT_FEASIBLE;
 	}
+
 	xServerPeriod = xPeriod;
 	xServerCapacity = xCapacity;
-	return pdPASS;
+
+	return xReturn;
 }
 /*-----------------------------------------------------------*/
 
@@ -2170,6 +2197,8 @@ BaseType_t xReturn;
 	}
 	#else
 	{
+	UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
+	TCB_t *listPointer;
 		/* The Idle task is being created using dynamically allocated RAM. */
 		xReturn = xTaskCreate(	prvIdleTask,
 								configIDLE_TASK_NAME,
@@ -2179,6 +2208,32 @@ BaseType_t xReturn;
 								( TickType_t ) 0,
 								portMAX_DELAY, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
 								( TickType_t ) 0);
+
+		for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
+		{
+			listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &xBatchedTasksList );
+			uxListRemove( &( ( listPointer )->xStateListItem ) );
+			if( listPointer->uxPriority != tskIDLE_PRIORITY )
+			{
+				prvAddTaskToReadyList( listPointer );
+			}
+			else
+			{
+				// TO-DO: Overflows are not properly covered by this. Needs fixing.
+				/* Put aperiodic tasks in their own list, sorted by arrival time. */
+				listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
+				vListInsert( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
+			}
+
+			#if ( configUSE_MUTEXES == 1 )
+			{
+				listPointer->uxBasePriority = listPointer->uxPriority;
+			}
+			#endif
+			/* Event lists are always in priority order. */
+			listSET_LIST_ITEM_VALUE( &( listPointer->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) listPointer->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
+			listSET_LIST_ITEM_OWNER( &( listPointer->xEventListItem ), listPointer );
+		}
 	}
 	#endif /* configSUPPORT_STATIC_ALLOCATION */
 
