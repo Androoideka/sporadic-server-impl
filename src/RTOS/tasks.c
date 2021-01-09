@@ -156,8 +156,8 @@ configSERVER_TASK_NAME in FreeRTOSConfig.h. */
 	/*-----------------------------------------------------------*/
 	#define taskSELECT_APERIODIC_IF_NEEDED()                                                                   \
 	{                                                                                                          \
-		UBaseType_t uxSize = listCURRENT_LIST_LENGTH( &xAperiodicTasksList );                                  \
-		if( pxCurrentTCB->xPeriod > xServerPeriod && uxSize < ( UBaseType_t ) 1U )                             \
+		UBaseType_t uxEmpty = listLIST_IS_EMPTY( &xAperiodicTasksList );                                       \
+		if( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty != pdFALSE )                                      \
 		{                                                                                                      \
 			if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                                               \
 			{                                                                                                  \
@@ -176,7 +176,7 @@ configSERVER_TASK_NAME in FreeRTOSConfig.h. */
 				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );                                \
 				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );                        \
 			}                                                                                                  \
-			if( pxCurrentTCB->xPeriod > xServerPeriod && uxSize > ( UBaseType_t ) 0U )                         \
+			if( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty == pdFALSE )                                  \
 			{                                                                                                  \
 				pxCurrentTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );                            \
 				pxCurrentTCB->uxPriority = uxServerPriority;                                                   \
@@ -1387,11 +1387,6 @@ double ufTaskProcUsage;
 }
 /*-----------------------------------------------------------*/
 
-static void prvResetTask( TCB_t *pxTCB )
-{
-	pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxOriginalTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
-}
-
 #if ( INCLUDE_vTaskDelete == 1 )
 
 	void vTaskDelete( TaskHandle_t xTaskToDelete )
@@ -1406,7 +1401,7 @@ static void prvResetTask( TCB_t *pxTCB )
 		expects to be reinitialised. */
 		if( xTaskToDelete == NULL && pxTCB->xPeriod > ( TickType_t ) 0U )
 		{
-			pxTCB->xStackInitRequired = 1;
+			pxTCB->xStackInitRequired = ( BaseType_t ) 1;
 			vTaskDelayUntil( &( pxTCB->xArrivalTime ), pxTCB->xPeriod );
 			return;
 		}
@@ -3114,8 +3109,8 @@ BaseType_t xSwitchRequired = pdFALSE;
 					task deleting itself. */
 					if( pxTCB->xStackInitRequired )
 					{
-						pxTCB->xStackInitRequired = 0;
-						prvResetTask( pxTCB );
+						pxTCB->xStackInitRequired = ( BaseType_t ) 0;
+						pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxOriginalTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
 					}
 
 					/* Set the period as the list item to sort by if the task is periodic

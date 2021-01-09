@@ -22,31 +22,7 @@
 #define errBADINPUT         -1001
 #define errNOTFOUND         -1002
 
-/*void task0(void *pvParams)
-{
-	int i;
-	for (i=0 ; i < 10; i++)
-	{
-		printf("+");
-		fflush(stdout);
-		vTaskDelay(1); //zakomentarisati ovu liniju radi testiranja
-	}
-	vTaskDelete(0);
-}
-
-void task1(void *pvParams)
-{
-	int i;
-	for (i=0 ; i < 10; i++)
-	{
-		printf("-");
-		fflush(stdout);
-		vTaskDelay(2);
-	}
-	vTaskDelete(0);
-}*/
-
-/*void task0(void *pvParams)
+void task0(void *pvParams)
 {
 	printf("+");
 	fflush(stdout);
@@ -58,31 +34,9 @@ void task1(void *pvParams)
 	printf("-");
 	fflush(stdout);
 	vTaskDelete(0);
-}*/
-
-/*void task0(void *pvParams)
-{
-	int i;
-	for (i=0 ; i < 10; i++)
-	{
-		printf("+");
-		fflush(stdout);
-		vTaskDelete(0); //zakomentarisati ovu liniju radi testiranja
-	}
 }
 
-void task1(void *pvParams)
-{
-	int i;
-	for (i=0 ; i < 10; i++)
-	{
-		printf("-");
-		fflush(stdout);
-		vTaskDelete(0);
-	}
-}*/
-
-/*static void (*pfFunctionForString(char pcString[]))(void* pvParams)
+static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 {
 	if(strcmp(pcString, "task0") == 0)
 	{
@@ -98,23 +52,23 @@ void task1(void *pvParams)
 	}
 }
 
-static TickType_t get_computation_time(char pcString[])
+static TickType_t xGetComputationTime(char pcString[])
 {
 	if(strcmp(pcString, "task0") == 0)
 	{
-		return task0;
+		return 1;
 	}
 	else if(strcmp(pcString, "task1") == 0)
 	{
-		return task1;
+		return 1;
 	}
 	else
 	{
-		return NULL;
+		return 0;
 	}
-}*/
+}
 
-void task1(void *pvParams)
+/*void task1(void *pvParams)
 {
 	int i;
 	TickType_t xStart = xTaskGetTickCount();
@@ -136,11 +90,11 @@ static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 	}
 	else if(strcmp(pcString, "task4") == 0)
 	{
-		//return task4;
+		return task4;
 	}
 	else if(strcmp(pcString, "task2") == 0)
 	{
-		//return task2;
+		return task2;
 	}
 	else
 	{
@@ -166,7 +120,7 @@ static TickType_t get_computation_time(char pcString[])
 	{
 		return NULL;
 	}
-}
+}*/
 
 static void exception_handler(BaseType_t xError)
 {
@@ -246,7 +200,7 @@ void input_handler(FILE *file) {
 			else
 			{
 				void (*pfFunc)(void* pvParams) = pfFunctionForString(pcFuncName);
-				TickType_t xComputationTime = get_computation_time(pcFuncName);
+				TickType_t xComputationTime = xGetComputationTime(pcFuncName);
 				if (pfFunc == NULL)
 				{
 					xError = errNOTFOUND;
@@ -275,7 +229,7 @@ void input_handler(FILE *file) {
 			else
 			{
 				void (*pfFunc)(void* pvParams) = pfFunctionForString(pcFuncName);
-				TickType_t xComputationTime = get_computation_time(pcFuncName);
+				TickType_t xComputationTime = xGetComputationTime(pcFuncName);
 				if (pfFunc == NULL)
 				{
 					xError = errNOTFOUND;
@@ -303,7 +257,7 @@ void input_handler(FILE *file) {
 			else
 			{
 				void (*pfFunc)(void* pvParams) = pfFunctionForString(pcFuncName);
-				TickType_t xComputationTime = get_computation_time(pcFuncName);
+				TickType_t xComputationTime = xGetComputationTime(pcFuncName);
 				if (pfFunc == NULL)
 				{
 					xError = errNOTFOUND;
@@ -352,12 +306,12 @@ void input_handler(FILE *file) {
 
 int main( void )
 {
-	//xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
-	//xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
+	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
+	xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
 
 	// Need tasks with computation times: 1, 4, 2
 
-	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 0, 1);
+	//xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 0, 1);
 
 	BaseType_t xError = xSetServer(5, 10);
 	if(xError == pdPASS) {
