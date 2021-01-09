@@ -362,11 +362,11 @@ PRIVILEGED_DATA static List_t xPendingReadyList;						/*< Tasks that have been r
 PRIVILEGED_DATA static List_t xAperiodicTasksList;                      /*< Aperiodic tasks that are currently ready. Aperiodic tasks share the other lists with periodic ones. */
 PRIVILEGED_DATA static List_t xBatchedTasksList;                        /*< List of tasks that are to be added. */
 
-typedef struct srvCapacityRefill
+typedef struct srvServerRefill
 {
-	ListItem_t xReleaseListItem;
-	TickType_t xCapacity;
-} SCR_t;
+	ListItem_t xReleaseTimeListItem; // RT
+	TickType_t xReleaseAmount; // RA
+} SR_t;
 
 // Why a queue? Because it's designed for smallish structs like the capacity filler
 // Capacity refilling is FIFO because a capacity refill queued later
@@ -378,12 +378,15 @@ PRIVILEGED_DATA static List_t xRefillQueue;
 PRIVILEGED_DATA static List_t xAvailableRefills;
 // This is the designated struct that will be modified while the server is active
 // Once the server stops being active, the struct will be sent to the queue
-PRIVILEGED_DATA static SCR_t * xRefill;
+PRIVILEGED_DATA static SR_t * pxActiveSR;
 // This value will change but will always get refilled to its initial state
 PRIVILEGED_DATA static TickType_t xServerCapacity = ( TickType_t ) 0U;
 // This value will stay static after initialization and will be used to calculate
 // the release tick in the capacity refill struct
 PRIVILEGED_DATA static TickType_t xServerPeriod = ( TickType_t ) 0U;
+// This value will stay static after initialization and will be used for
+// time slicing
+PRIVILEGED_DATA static UBaseType_t uxServerPriority = tskIDLE_PRIORITY;
 
 #if( INCLUDE_vTaskDelete == 1 )
 
@@ -608,7 +611,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
  * Called to check schedulability of a batch and to allocate every
  * periodic task to a ready list.
  */
-static BaseType_t xPrepareBatch ( void ) PRIVILEGED_FUNCTION;
+static BaseType_t xPrepareBatch ( TickType_t xCapacity, TickType_t xPeriod ) PRIVILEGED_FUNCTION;
 
 /*
  * freertos_tasks_c_additions_init() should only be called if the user definable
@@ -789,7 +792,7 @@ static BaseType_t xPrepareBatch ( void ) PRIVILEGED_FUNCTION;
 	TCB_t *pxNewTCB;
 	BaseType_t xReturn;
 
-		if(xPeriod > ( TickType_t ) 0 && xSchedulerRunning != pdFALSE)
+		if(xPeriod > ( TickType_t ) 0U && xSchedulerRunning != pdFALSE)
 		{
 			return errSCHEDULER_RUNNING;
 		}
@@ -1052,7 +1055,7 @@ UBaseType_t x;
 	}
 	#endif
 
-	/* Initialize the TCB stack to look as if the task was already running,
+	/* Initialise the TCB stack to look as if the task was already running,
 	but had been interrupted by the scheduler.  The return address is set
 	to the start of the task function. Once the stack has been initialised
 	the top of stack variable is updated. */
@@ -1128,7 +1131,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 	{
 		/* There are no other tasks, or all the other tasks are in
 		the suspended state - make this the current task. */
-		if ( pxNewTCB->xPeriod > (TickType_t) 0 )
+		if ( pxNewTCB->xArrivalTime == ( TickType_t ) configINITIAL_TICK_COUNT )
 		{
 			pxCurrentTCB = pxNewTCB;
 		}
@@ -1179,13 +1182,25 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 	{
 		/* Pend tasks for the next batch order. */
 		vListInsertEnd( &xBatchedTasksList, &( ( pxNewTCB )->xStateListItem ) );
+		/* If the task currently being created is aperiodic, we can safely initialise the event list item. */
+		if ( xSchedulerRunning != pdFALSE )
+		{
+			#if ( configUSE_MUTEXES == 1 )
+			{
+				pxNewTCB->uxBasePriority = pxNewTCB->uxPriority;
+			}
+			#endif
+			/* Event lists are always in priority order. */
+			listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) pxNewTCB->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
+			listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
+		}
 	}
 
 	portSETUP_TCB( pxNewTCB );
 }
 /*-----------------------------------------------------------*/
 
-static BaseType_t xPrepareBatch( void )
+static BaseType_t xPrepareBatch( TickType_t xCapacity, TickType_t xPeriod )
 {
 UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
 TCB_t *listPointer;
@@ -1201,7 +1216,7 @@ double ufTaskProcUsage;
 	for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
 	{
 		listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
-		if( listPointer->xPeriod == ( TickType_t ) 0 )
+		if( listPointer->xPeriod == ( TickType_t ) 0U )
 		{
 			continue;
 		}
@@ -1264,46 +1279,62 @@ double ufTaskProcUsage;
 				}
 			}
 		}
-		printf("Task: %u %u\n", listPointer->uxPriority, listPointer->xPeriod);
 	}
 
-	return pdPASS;
-}
-/*-----------------------------------------------------------*/
-
-BaseType_t xDistributeBatch( void )
-{
-UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
-TCB_t *listPointer;
-
-	if( xSchedulerRunning == pdFALSE )
-	{
-		return errNOT_CALLABLE;
+	ufTaskProcUsage = xCapacity / xPeriod;
+	ufTaskProcUsage++;
+	if(ufSchedulability * ufTaskProcUsage > 2) {
+		return errSCHEDULE_NOT_FEASIBLE;
 	}
+	ufSchedulability *= ufTaskProcUsage;
 
-	if( uxBatchSize < ( UBaseType_t ) 1U )
+	if( xPeriod <= xMin )
 	{
-		return errQUEUE_EMPTY;
-	}
-
-	for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
-	{
-		listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &xBatchedTasksList );
-		uxListRemove( &( ( listPointer )->xStateListItem ) );
-
-		// TO-DO: Overflows are not properly covered by this. Needs fixing.
-		/* Put aperiodic tasks in their own list, sorted by arrival time. */
-		listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
-		vListInsert( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
-
-		#if ( configUSE_MUTEXES == 1 )
+		if( uxTopPriority < configMAX_PRIORITIES && xPeriod < xMin)
 		{
-			listPointer->uxBasePriority = listPointer->uxPriority;
+			++uxTopPriority;
 		}
-		#endif
-		/* Event lists are always in priority order. */
-		listSET_LIST_ITEM_VALUE( &( listPointer->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) listPointer->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
-		listSET_LIST_ITEM_OWNER( &( listPointer->xEventListItem ), listPointer );
+		uxServerPriority = uxTopPriority;
+		xMin = xPeriod;
+	}
+	else if( xPeriod >= xMax )
+	{
+		if( xPeriod > xMax )
+		{
+			UBaseType_t j;
+			TCB_t *updateListPointer = listGET_OWNER_OF_HEAD_ENTRY( &xBatchedTasksList );
+			for( j = ( UBaseType_t ) 1U; j < uxTopPriority; j++ )
+			{
+				pxMins[j] = portMAX_DELAY;
+			}
+			for( j = ( UBaseType_t ) 0U; j < i; j++ )
+			{
+				if( updateListPointer->uxPriority < configMAX_PRIORITIES )
+				{
+					updateListPointer->uxPriority = updateListPointer->uxPriority + ( UBaseType_t ) 1U;
+				}
+				if( updateListPointer->xPeriod < pxMins[ updateListPointer->uxPriority ] )
+				{
+					pxMins[ updateListPointer->uxPriority ] = updateListPointer->xPeriod;
+				}
+				ListItem_t *pxNext = listGET_NEXT( &( updateListPointer->xStateListItem ) );
+				updateListPointer = listGET_LIST_ITEM_OWNER( pxNext );
+			}
+		}
+		uxServerPriority = ( UBaseType_t ) 1U;
+		xMax = xPeriod;
+	}
+	else
+	{
+		UBaseType_t j;
+		for( j = ( UBaseType_t ) 2U; j < uxTopPriority; j++ )
+		{
+			uxServerPriority = j - ( UBaseType_t ) 1U;
+			if( xPeriod > pxMins[ j ] )
+			{
+				break;
+			}
+		}
 	}
 
 	return pdPASS;
@@ -1326,8 +1357,8 @@ static void prvResetTask( TCB_t *pxTCB )
 		pxTCB = prvGetTCBFromHandle( xTaskToDelete );
 
 		/* If a periodic task is deleting itself then that means it
-		expects to be reinitialized. */
-		if( xTaskToDelete == NULL && pxTCB->xPeriod > ( TickType_t ) 0 )
+		expects to be reinitialised. */
+		if( xTaskToDelete == NULL && pxTCB->xPeriod > ( TickType_t ) 0U )
 		{
 			pxTCB->xStackInitRequired = 1;
 			vTaskDelayUntil( &( pxTCB->xArrivalTime ), pxTCB->xPeriod );
@@ -2138,27 +2169,69 @@ static void prvResetTask( TCB_t *pxTCB )
 #endif /* ( ( INCLUDE_xTaskResumeFromISR == 1 ) && ( INCLUDE_vTaskSuspend == 1 ) ) */
 /*-----------------------------------------------------------*/
 
-BaseType_t xSetServer(TickType_t xPeriod, TickType_t xCapacity)
+BaseType_t xSetServer( TickType_t xCapacity, TickType_t xPeriod )
 {
+BaseType_t xReturn;
+UBaseType_t uxSize;
 
 	if(xSchedulerRunning != pdFALSE) {
 		return errSCHEDULER_RUNNING;
 	}
 
-	BaseType_t xReturn = xPrepareBatch();
+	xReturn = xPrepareBatch( xCapacity, xPeriod );
 
 	if( xReturn != pdPASS )
 	{
 		return xReturn;
 	}
 
-	// schedulability check needs to be done differently
-	if(ufSchedulability > 2) {
-		return errSCHEDULE_NOT_FEASIBLE;
-	}
-
 	xServerPeriod = xPeriod;
 	xServerCapacity = xCapacity;
+
+	// https://stackoverflow.com/questions/2745074/fast-ceiling-of-an-integer-division-in-c-c
+	UBaseType_t xRefillQueueSize = ( xPeriod + ( UBaseType_t ) 1U ) / ( UBaseType_t ) 2U;
+
+	for( UBaseType_t i = 0U; i < xRefillQueueSize; i++ )
+	{
+		pxActiveSR = ( SR_t * ) pvPortMalloc( sizeof( SR_t ) );
+		if( pxActiveSR == NULL )
+		{
+			return errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY;
+		}
+		vListInitialiseItem( &( pxActiveSR->xReleaseTimeListItem ) );
+
+		/* Set the pxActiveSR as a link back from the ListItem_t.  This is so we can get
+		back to	the containing Refill from a generic item in a list. */
+		listSET_LIST_ITEM_OWNER( &( pxActiveSR->xReleaseTimeListItem ), pxActiveSR );
+
+		vListInsertEnd( &xAvailableRefills, &( ( pxActiveSR )->xReleaseTimeListItem ) );
+	}
+	uxSize = listCURRENT_LIST_LENGTH( &xAperiodicTasksList );
+	if( pxCurrentTCB->xPeriod > xServerPeriod && uxSize < ( UBaseType_t ) 1U )
+	{
+		if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )
+		{
+			( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );
+			vListInsertEnd( &xAvailableRefills, &( pxActiveSR->xReleaseTimeListItem ) );
+		}
+		pxActiveSR = NULL;
+	}
+	else
+	{
+		if( pxActiveSR == NULL )
+		{
+			pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
+			listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );
+			pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
+			( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );
+			vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );
+		}
+		if( pxCurrentTCB->xPeriod > xServerPeriod && uxSize > ( UBaseType_t ) 0U )
+		{
+			pxCurrentTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );
+			pxCurrentTCB->uxPriority = uxServerPriority;
+		}
+	}
 
 	return xReturn;
 }
@@ -2197,33 +2270,22 @@ BaseType_t xReturn;
 	}
 	#else
 	{
-	UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
-	TCB_t *listPointer;
+		UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
+		TCB_t *listPointer;
+
 		/* The Idle task is being created using dynamically allocated RAM. */
 		xReturn = xTaskCreate(	prvIdleTask,
 								configIDLE_TASK_NAME,
 								configMINIMAL_STACK_SIZE,
 								( void * ) NULL,
 								&xIdleTaskHandle,
-								( TickType_t ) 0,
+								( TickType_t ) 0U,
 								portMAX_DELAY, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
 								( TickType_t ) 0);
 
 		for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
 		{
 			listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &xBatchedTasksList );
-			uxListRemove( &( ( listPointer )->xStateListItem ) );
-			if( listPointer->uxPriority != tskIDLE_PRIORITY )
-			{
-				prvAddTaskToReadyList( listPointer );
-			}
-			else
-			{
-				// TO-DO: Overflows are not properly covered by this. Needs fixing.
-				/* Put aperiodic tasks in their own list, sorted by arrival time. */
-				listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
-				vListInsert( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
-			}
 
 			#if ( configUSE_MUTEXES == 1 )
 			{
@@ -2233,6 +2295,21 @@ BaseType_t xReturn;
 			/* Event lists are always in priority order. */
 			listSET_LIST_ITEM_VALUE( &( listPointer->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) listPointer->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
 			listSET_LIST_ITEM_OWNER( &( listPointer->xEventListItem ), listPointer );
+
+			if( listPointer->uxPriority != tskIDLE_PRIORITY )
+			{
+				uxListRemove( &( ( listPointer )->xStateListItem ) );
+				prvAddTaskToReadyList( listPointer );
+			}
+			else if ( listPointer->xArrivalTime == configINITIAL_TICK_COUNT )
+			{
+				/* Place aperiodic tasks which start from the scheduler's first tick
+				into the list of ready aperiodic tasks. */
+				uxListRemove( &( ( listPointer )->xStateListItem ) );
+				listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
+				vListInsertEnd( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
+				listPointer->uxPriority = uxServerPriority;
+			}
 		}
 	}
 	#endif /* configSUPPORT_STATIC_ALLOCATION */
@@ -2894,6 +2971,7 @@ implementations require configUSE_TICKLESS_IDLE to be set to a value other than
 
 BaseType_t xTaskIncrementTick( void )
 {
+SR_t * pxSR;
 TCB_t * pxTCB;
 TickType_t xItemValue;
 BaseType_t xSwitchRequired = pdFALSE;
@@ -2919,6 +2997,46 @@ BaseType_t xSwitchRequired = pdFALSE;
 		else
 		{
 			mtCOVERAGE_TEST_MARKER();
+		}
+
+		/* Check if a refill is on the menu. */
+		if( listLIST_IS_EMPTY( &xRefillQueue ) == pdFALSE )
+		{
+			pxSR = listGET_OWNER_OF_HEAD_ENTRY( &xRefillQueue );
+			xItemValue = listGET_LIST_ITEM_VALUE( &( pxSR->xReleaseTimeListItem ) );
+			if ( xConstTickCount == xItemValue )
+			{
+				( void ) uxListRemove( &( pxSR->xReleaseTimeListItem ) );
+				vListInsertEnd( &xAvailableRefills, &( pxSR->xReleaseTimeListItem ) );
+				xServerCapacity += pxSR->xReleaseAmount;
+			}
+		}
+
+		/* If an aperiodic task is currently using the server,
+		queue more capacity to be refilled. */
+		if( pxActiveSR != NULL && pxCurrentTCB->xPeriod == ( TickType_t ) 0U )
+		{
+			pxActiveSR->xReleaseAmount++;
+		}
+
+		for(;;)
+		{
+			if( listLIST_IS_EMPTY( &xBatchedTasksList ) != pdFALSE )
+			{
+				break;
+			}
+			pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &xBatchedTasksList );
+			if( pxTCB->xArrivalTime != xConstTickCount )
+			{
+				break;
+			}
+			( void ) uxListRemove( &( pxTCB->xStateListItem ) );
+			vListInsertEnd( &xAperiodicTasksList, &( ( pxTCB )->xStateListItem ) );
+
+			if ( pxCurrentTCB->xPeriod != ( TickType_t ) 0U && xServerPeriod > pxCurrentTCB->xPeriod )
+			{
+				xSwitchRequired = pdTRUE;
+			}
 		}
 
 		/* See if this tick has made a timeout expire.  Tasks are stored in
@@ -2990,7 +3108,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 					if( pxTCB->xPeriod == ( TickType_t ) 0 )
 					{
 						listSET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ), pxTCB->xArrivalTime );
-						vListInsert( &xAperiodicTasksList, &( ( pxTCB )->xStateListItem ) );
+						vListInsertEnd( &xAperiodicTasksList, &( ( pxTCB )->xStateListItem ) );
 					}
 					else
 					{
@@ -3195,6 +3313,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 
 void vTaskSwitchContext( void )
 {
+UBaseType_t uxSize;
 	if( uxSchedulerSuspended != ( UBaseType_t ) pdFALSE )
 	{
 		/* The scheduler is currently suspended - do not allow a context
@@ -3246,6 +3365,34 @@ void vTaskSwitchContext( void )
 		/* Select a new task to run using either the generic C or port
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
+
+		/* This would be a nice macro as it's called in SetServer too */
+		uxSize = listCURRENT_LIST_LENGTH( &xAperiodicTasksList );
+		if( pxCurrentTCB->xPeriod > xServerPeriod && uxSize < ( UBaseType_t ) 1U )
+		{
+			if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )
+			{
+				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );
+				vListInsertEnd( &xAvailableRefills, &( pxActiveSR->xReleaseTimeListItem ) );
+			}
+			pxActiveSR = NULL;
+		}
+		else
+		{
+			if( pxActiveSR == NULL )
+			{
+				pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
+				listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );
+				pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
+				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );
+				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );
+			}
+			if( pxCurrentTCB->xPeriod > xServerPeriod && uxSize > ( UBaseType_t ) 0U )
+			{
+				pxCurrentTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );
+				pxCurrentTCB->uxPriority = uxServerPriority;
+			}
+		}
 
 		traceTASK_SWITCHED_IN();
 
@@ -3807,6 +3954,9 @@ UBaseType_t uxPriority;
 	vListInitialise( &xPendingReadyList );
 	vListInitialise( &xBatchedTasksList );
 	vListInitialise( &xAperiodicTasksList );
+
+	vListInitialise( &xRefillQueue );
+	vListInitialise( &xAvailableRefills );
 
 	#if ( INCLUDE_vTaskDelete == 1 )
 	{

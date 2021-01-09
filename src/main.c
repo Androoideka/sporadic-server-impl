@@ -9,9 +9,9 @@
 #include "task.h"
 
 #define commADDPD     ( BaseType_t ) 1
-#define commADDAPD    ( BaseType_t ) 2
-#define commREMOV     ( BaseType_t ) 3
-#define commBATCH     ( BaseType_t ) 4
+#define commADDAB     ( BaseType_t ) 2 // command add aperiodic batched
+#define commADDAN     ( BaseType_t ) 3 // command add aperiodic now
+#define commREMOV     ( BaseType_t ) 4
 #define commSINIT     ( BaseType_t ) 5
 
 #define COMMAND_SIZE        17
@@ -46,7 +46,7 @@ void task1(void *pvParams)
 	vTaskDelete(0);
 }*/
 
-void task0(void *pvParams)
+/*void task0(void *pvParams)
 {
 	printf("+");
 	fflush(stdout);
@@ -58,7 +58,7 @@ void task1(void *pvParams)
 	printf("-");
 	fflush(stdout);
 	vTaskDelete(0);
-}
+}*/
 
 /*void task0(void *pvParams)
 {
@@ -82,7 +82,7 @@ void task1(void *pvParams)
 	}
 }*/
 
-static void (*pfFunctionForString(char pcString[]))(void* pvParams)
+/*static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 {
 	if(strcmp(pcString, "task0") == 0)
 	{
@@ -91,6 +91,76 @@ static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 	else if(strcmp(pcString, "task1") == 0)
 	{
 		return task1;
+	}
+	else
+	{
+		return NULL;
+	}
+}
+
+static TickType_t get_computation_time(char pcString[])
+{
+	if(strcmp(pcString, "task0") == 0)
+	{
+		return task0;
+	}
+	else if(strcmp(pcString, "task1") == 0)
+	{
+		return task1;
+	}
+	else
+	{
+		return NULL;
+	}
+}*/
+
+void task1(void *pvParams)
+{
+	int i;
+	TickType_t xStart = xTaskGetTickCount();
+	for (i=0 ; i < 500; i++)
+	{
+		printf("-");
+		fflush(stdout);
+	}
+	printf("\n%u", xStart - xTaskGetTickCount());
+	fflush(stdout);
+	vTaskDelete(0);
+}
+
+static void (*pfFunctionForString(char pcString[]))(void* pvParams)
+{
+	if(strcmp(pcString, "task1") == 0)
+	{
+		return task1;
+	}
+	else if(strcmp(pcString, "task4") == 0)
+	{
+		//return task4;
+	}
+	else if(strcmp(pcString, "task2") == 0)
+	{
+		//return task2;
+	}
+	else
+	{
+		return NULL;
+	}
+}
+
+static TickType_t get_computation_time(char pcString[])
+{
+	if(strcmp(pcString, "task1") == 0)
+	{
+		return ( TickType_t ) 1U;
+	}
+	else if(strcmp(pcString, "task4") == 0)
+	{
+		return ( TickType_t ) 4U;
+	}
+	else if(strcmp(pcString, "task2") == 0)
+	{
+		return ( TickType_t ) 2U;
 	}
 	else
 	{
@@ -147,12 +217,12 @@ void input_handler(FILE *file) {
 
 		if(strcmp(pcCommand, "add_task_periodic") == 0)
 			xCommand = commADDPD;
+		else if(strcmp(pcCommand, "add_task_later") == 0)
+			xCommand = commADDAB;
 		else if(strcmp(pcCommand, "add_task") == 0)
-			xCommand = commADDAPD;
+			xCommand = commADDAN;
 		else if(strcmp(pcCommand, "remove_task") == 0)
 			xCommand = commREMOV;
-		else if(strcmp(pcCommand, "commit_batch") == 0)
-			xCommand = commBATCH;
 		else if(strcmp(pcCommand, "initialize_server") == 0)
 			xCommand = commSINIT;
 		else
@@ -163,9 +233,9 @@ void input_handler(FILE *file) {
 			char pcName[configMAX_TASK_NAME_LEN];
 			char pcFuncName[FUNC_NAME_SIZE];
 			char pvParams[configMAX_PARAM_LEN];
-			int xPeriod;
+			TickType_t xPeriod;
 
-			if(fscanf(file, "%s %s %s %d", pcName, pcFuncName, pvParams, &xPeriod) != 4)
+			if(fscanf(file, "%s %s %s %u", pcName, pcFuncName, pvParams, &xPeriod) != 4)
 			{
 				xError = errMISSINGPARAM;
 			}
@@ -176,24 +246,25 @@ void input_handler(FILE *file) {
 			else
 			{
 				void (*pfFunc)(void* pvParams) = pfFunctionForString(pcFuncName);
+				TickType_t xComputationTime = get_computation_time(pcFuncName);
 				if (pfFunc == NULL)
 				{
 					xError = errNOTFOUND;
 				}
 				else
 				{
-					xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, 0, 0, 150, 1);
+					xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, 0, 0, xPeriod, xComputationTime);
 				}
 			}
 		}
-		else if(xCommand == commADDAPD)
+		else if(xCommand == commADDAB)
 		{
 			char pcName[configMAX_TASK_NAME_LEN];
 			char pcFuncName[FUNC_NAME_SIZE];
 			char pvParams[configMAX_PARAM_LEN];
-			int xStartTime;
+			TickType_t xArrivalTime;
 
-			if(fscanf(file, "%s %s %s %d", pcName, pcFuncName, pvParams, &xStartTime) != 4)
+			if(fscanf(file, "%s %s %s %u", pcName, pcFuncName, pvParams, &xArrivalTime) != 4)
 			{
 				xError = errMISSINGPARAM;
 			}
@@ -204,13 +275,42 @@ void input_handler(FILE *file) {
 			else
 			{
 				void (*pfFunc)(void* pvParams) = pfFunctionForString(pcFuncName);
+				TickType_t xComputationTime = get_computation_time(pcFuncName);
 				if (pfFunc == NULL)
 				{
 					xError = errNOTFOUND;
 				}
 				else
 				{
-					xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, 0, 0, 0, 1);
+					xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, 0, xArrivalTime, 0, xComputationTime);
+				}
+			}
+		}
+		else if(xCommand == commADDAN)
+		{
+			char pcName[configMAX_TASK_NAME_LEN];
+			char pcFuncName[FUNC_NAME_SIZE];
+			char pvParams[configMAX_PARAM_LEN];
+
+			if(fscanf(file, "%s %s %s", pcName, pcFuncName, pvParams) != 3)
+			{
+				xError = errMISSINGPARAM;
+			}
+			else if(strlen(pcName) >= configMAX_TASK_NAME_LEN || strlen(pcFuncName) >= FUNC_NAME_SIZE || strlen(pvParams) >= configMAX_PARAM_LEN)
+			{
+				xError = errBADINPUT;
+			}
+			else
+			{
+				void (*pfFunc)(void* pvParams) = pfFunctionForString(pcFuncName);
+				TickType_t xComputationTime = get_computation_time(pcFuncName);
+				if (pfFunc == NULL)
+				{
+					xError = errNOTFOUND;
+				}
+				else
+				{
+					xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, 0, xTaskGetTickCount(), 0, xComputationTime);
 				}
 			}
 		}
@@ -227,17 +327,13 @@ void input_handler(FILE *file) {
 				// We'll call a remove task method from task.h here
 			}
 		}
-		else if(xCommand == commBATCH)
-		{
-			xError = xDistributeBatch();
-		}
 		else if(xCommand == commSINIT)
 		{
-			int xPeriod;
-			int xCapacity;
+			TickType_t xPeriod;
+			TickType_t xCapacity;
 
 			// We'll initialize a server here (work in progress)
-			if(fscanf(file, "%d %d", &xPeriod, &xCapacity) != 2)
+			if(fscanf(file, "%u %u", &xPeriod, &xCapacity) != 2)
 			{
 				xError = errMISSINGPARAM;
 			}
@@ -256,10 +352,14 @@ void input_handler(FILE *file) {
 
 int main( void )
 {
-	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
-	xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
+	//xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
+	//xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
 
-	BaseType_t xError = xSetServer(5, 2);
+	// Need tasks with computation times: 1, 4, 2
+
+	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 0, 1);
+
+	BaseType_t xError = xSetServer(5, 10);
 	if(xError == pdPASS) {
 		vTaskStartScheduler();
 	}
