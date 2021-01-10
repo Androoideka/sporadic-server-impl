@@ -157,7 +157,7 @@ configSERVER_TASK_NAME in FreeRTOSConfig.h. */
 	#define taskSELECT_APERIODIC_IF_NEEDED()                                                                          \
 	{                                                                                                                 \
 		UBaseType_t uxEmpty = listLIST_IS_EMPTY( &xAperiodicTasksList );                                              \
-		if( xServerCapacity <= ( TickType_t ) 0 || ( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty != pdFALSE ) )  \
+		if( xServerCapacity == ( TickType_t ) 0U || ( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty != pdFALSE ) ) \
 		{                                                                                                             \
 			if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                                                      \
 			{                                                                                                         \
@@ -3027,7 +3027,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 		{
 			pxActiveSR->xReleaseAmount++;
 			xServerCapacity--;
-			if( xServerCapacity <= ( TickType_t ) 0U )
+			if( xServerCapacity == ( TickType_t ) 0U )
 			{
 				xSwitchRequired = pdTRUE;
 			}
