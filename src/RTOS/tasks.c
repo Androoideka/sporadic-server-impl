@@ -154,34 +154,32 @@ configSERVER_TASK_NAME in FreeRTOSConfig.h. */
 	} /* taskSELECT_HIGHEST_PRIORITY_TASK */
 
 	/*-----------------------------------------------------------*/
-	#define taskSELECT_APERIODIC_IF_NEEDED()                                                                   \
-	{                                                                                                          \
-		UBaseType_t uxEmpty = listLIST_IS_EMPTY( &xAperiodicTasksList );                                       \
-		if( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty != pdFALSE )                                      \
-		{                                                                                                      \
-			if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                                               \
-			{                                                                                                  \
-				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );                                \
-				vListInsertEnd( &xAvailableRefills, &( pxActiveSR->xReleaseTimeListItem ) );                   \
-			}                                                                                                  \
-			pxActiveSR = NULL;                                                                                 \
-		}                                                                                                      \
-		else                                                                                                   \
-		{                                                                                                      \
-			if( pxActiveSR == NULL )                                                                           \
-			{                                                                                                  \
-				pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );                                \
-				listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );  \
-				pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;                                                \
-				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );                                \
-				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );                        \
-			}                                                                                                  \
-			if( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty == pdFALSE )                                  \
-			{                                                                                                  \
-				pxCurrentTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );                            \
-				pxCurrentTCB->uxPriority = uxServerPriority;                                                   \
-			}                                                                                                  \
-		}																									   \
+	#define taskSELECT_APERIODIC_IF_NEEDED()                                                                          \
+	{                                                                                                                 \
+		UBaseType_t uxEmpty = listLIST_IS_EMPTY( &xAperiodicTasksList );                                              \
+		if( xServerCapacity <= ( TickType_t ) 0 || ( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty != pdFALSE ) )  \
+		{                                                                                                             \
+			if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                                                      \
+			{                                                                                                         \
+				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );                                       \
+				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );                               \
+			}                                                                                                         \
+			pxActiveSR = NULL;                                                                                        \
+		}                                                                                                             \
+		else                                                                                                          \
+		{                                                                                                             \
+			if( pxActiveSR == NULL )                                                                                  \
+			{                                                                                                         \
+				pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );                                       \
+				listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );         \
+				pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;                                                       \
+			}                                                                                                         \
+			if( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty == pdFALSE )                                         \
+			{                                                                                                         \
+				pxCurrentTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );                                   \
+				pxCurrentTCB->uxPriority = uxServerPriority;                                                          \
+			}                                                                                                         \
+		}																									          \
 	} /* taskSELECT_APERIODIC_IF_NEEDED */
 
 	/* Define away taskRESET_READY_PRIORITY() and portRESET_READY_PRIORITY() as
@@ -1231,8 +1229,6 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 					pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
 					listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );
 					pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
-					( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );
-					vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );
 					pxCurrentTCB = pxNewTCB;
 					pxCurrentTCB->uxPriority = uxServerPriority;
 				}
@@ -3027,6 +3023,11 @@ BaseType_t xSwitchRequired = pdFALSE;
 		if( pxActiveSR != NULL && pxCurrentTCB->xPeriod == ( TickType_t ) 0U )
 		{
 			pxActiveSR->xReleaseAmount++;
+			xServerCapacity--;
+			if( xServerCapacity <= ( TickType_t ) 0U )
+			{
+				xSwitchRequired = pdTRUE;
+			}
 		}
 
 		for(;;)
