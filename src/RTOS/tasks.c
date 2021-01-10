@@ -1218,24 +1218,27 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 			/* Event lists are always in priority order. */
 			listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) pxNewTCB->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
 			listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
-		}
-		if( pxNewTCB->xPeriod == ( TickType_t ) 0U && pxNewTCB->xArrivalTime == xTickCount )
-		{
-			vListInsertEnd( &xAperiodicTasksList, &( ( pxNewTCB )->xStateListItem ) );
-			if( xSchedulerRunning != pdFALSE )
+			if( pxNewTCB->xArrivalTime == xTickCount )
 			{
-				if( pxCurrentTCB->xPeriod > xServerPeriod )
+				vListInsertEnd( &xAperiodicTasksList, &( ( pxNewTCB )->xStateListItem ) );
+				if( xSchedulerRunning != pdFALSE )
 				{
-					pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
-					listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );
-					pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
-					pxCurrentTCB = pxNewTCB;
-					pxCurrentTCB->uxPriority = uxServerPriority;
+					if( pxCurrentTCB->xPeriod > xServerPeriod )
+					{
+						pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
+						listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );
+						pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
+						pxCurrentTCB = pxNewTCB;
+						pxCurrentTCB->uxPriority = uxServerPriority;
+					}
 				}
 			}
 		}
-		/* Pend tasks for the next batch order. */
-		vListInsertEnd( &xBatchedTasksList, &( ( pxNewTCB )->xStateListItem ) );
+		if( pxNewTCB->xPeriod != ( TickType_t ) 0U || pxNewTCB->xArrivalTime != xTickCount )
+		{
+			/* Pend tasks for the next batch order. */
+			vListInsertEnd( &xBatchedTasksList, &( ( pxNewTCB )->xStateListItem ) );
+		}
 	}
 
 	portSETUP_TCB( pxNewTCB );
