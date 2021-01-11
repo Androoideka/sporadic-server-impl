@@ -345,24 +345,51 @@ is used in assert() statements. */
  *
  * Set the parameters of the server.
  *
- * @return If the submitted server is not schedulable, errSCHEDULE_NOT_FEASIBLE is returned.
- * Otherwise the server is created if not initialized prior, and its values are set to
- * the given parameters.
+ * @return If the submitted server and tasks are not schedulable, errSCHEDULE_NOT_FEASIBLE is returned.
+ * If no tasks were added, errQUEUE_EMPTY is returned. (This should never happen as the system should
+ * have at least 1 periodic task that handles input while the system is active)
+ * Otherwise the server is created, and its capacity and period are set to the given parameters.
  *
  * Example usage:
    <pre>
  // Function that initializes the server.
- TickType_t xCapacity, xServer;
+ TickType_t xCapacity, xPeriod;
  void vOtherFunction( void )
  {
 	 // Initializes the server with the given parameters.
-	 xSetServer(xCapacity, xServer);
+	 xSetServer(xCapacity, xPeriod);
  }
    </pre>
  * \defgroup xSetServer xSetServer
  * \ingroup Tasks
  */
-BaseType_t xSetServer( TickType_t xCapacity, TickType_t xServer ) PRIVILEGED_FUNCTION;
+BaseType_t xSetServer( TickType_t xCapacity, TickType_t xPeriod ) PRIVILEGED_FUNCTION;
+
+/**
+ * task. h
+ *<pre>
+ BaseType_t xGetMaxServerCapacity( TickType_t * xCapacity, TickType_t xPeriod );</pre>
+ *
+ * Get the maximum possible capacity of the server for the given set of tasks and server period.
+ *
+ * @return If the submitted set of tasks is not schedulable, errSCHEDULE_NOT_FEASIBLE is returned.
+ * Otherwise the value of xCapacity is changed to represent the maximum possible capacity of the server
+ * given the period. Beware, this value can be 0.
+ *
+ * Example usage:
+   <pre>
+ // Function that initializes the server.
+ TickType_t xCapacity, xPeriod;
+ void vOtherFunction( void )
+ {
+	 // Initializes the server with the given parameters.
+	 xGetMaxServerCapacity(&xCapacity, xPeriod);
+ }
+   </pre>
+ * \defgroup xGetMaxServerCapacity xGetMaxServerCapacity
+ * \ingroup Tasks
+ */
+BaseType_t xGetMaxServerCapacity( TickType_t * xCapacity, TickType_t xPeriod ) PRIVILEGED_FUNCTION;
 
 /**
  * task. h

@@ -12,7 +12,8 @@
 #define commADDAB     ( BaseType_t ) 2 // command add aperiodic batched
 #define commADDAN     ( BaseType_t ) 3 // command add aperiodic now
 #define commREMOV     ( BaseType_t ) 4
-#define commSINIT     ( BaseType_t ) 5
+#define commSCHCK     ( BaseType_t ) 5
+#define commSINIT     ( BaseType_t ) 6
 
 #define COMMAND_SIZE        17
 #define FUNC_NAME_SIZE      17
@@ -129,7 +130,7 @@ static void exception_handler(BaseType_t xError)
 	if(xError == errSCHEDULER_RUNNING)
 		printf("Cannot add periodic tasks while scheduler is running.");
 	if(xError == errSCHEDULE_NOT_FEASIBLE)
-		printf("Schedule was not feasible with new additions.\n");
+		printf("Schedule was not feasible with given set of tasks and server parameters.\n");
 	if(xError == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY)
 		printf("Couldn't allocate required memory.\n");
 	if(xError == errNOT_CALLABLE)
@@ -177,6 +178,8 @@ void input_handler(FILE *file) {
 			xCommand = commADDAN;
 		else if(strcmp(pcCommand, "remove_task") == 0)
 			xCommand = commREMOV;
+		else if(strcmp(pcCommand, "get_max_server_capacity") == 0)
+			xCommand = commSCHCK;
 		else if(strcmp(pcCommand, "initialize_server") == 0)
 			xCommand = commSINIT;
 		else
@@ -281,19 +284,32 @@ void input_handler(FILE *file) {
 				// We'll call a remove task method from task.h here
 			}
 		}
-		else if(xCommand == commSINIT)
+		else if(xCommand == commSCHCK)
 		{
-			TickType_t xPeriod;
 			TickType_t xCapacity;
+			TickType_t xPeriod;
 
-			// We'll initialize a server here (work in progress)
-			if(fscanf(file, "%u %u", &xPeriod, &xCapacity) != 2)
+			if(fscanf(file, "%u", &xPeriod) != 1)
 			{
 				xError = errMISSINGPARAM;
 			}
 			else
 			{
-				xError = xSetServer(xPeriod, xCapacity);
+				xError = xGetMaxServerCapacity(&xCapacity, xPeriod);
+			}
+		}
+		else if(xCommand == commSINIT)
+		{
+			TickType_t xCapacity;
+			TickType_t xPeriod;
+
+			if(fscanf(file, "%u %u", &xCapacity, &xPeriod) != 2)
+			{
+				xError = errMISSINGPARAM;
+			}
+			else
+			{
+				xError = xSetServer(xCapacity, xPeriod);
 				if(xError == pdPASS) {
 					vTaskStartScheduler();
 					return;

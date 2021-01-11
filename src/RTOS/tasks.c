@@ -636,7 +636,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
  * Called to check schedulability of a batch and to allocate every
  * periodic task to a ready list.
  */
-static BaseType_t xPrepareBatch ( TickType_t xCapacity, TickType_t xPeriod ) PRIVILEGED_FUNCTION;
+static BaseType_t xPrepareBatch ( void ) PRIVILEGED_FUNCTION;
 
 /*
  * freertos_tasks_c_additions_init() should only be called if the user definable
@@ -1278,7 +1278,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 }
 /*-----------------------------------------------------------*/
 
-static BaseType_t xPrepareBatch( TickType_t xCapacity, TickType_t xPeriod )
+static BaseType_t xPrepareBatch( void )
 {
 UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
 TCB_t *listPointer;
@@ -1355,62 +1355,6 @@ double ufTaskProcUsage;
 						break;
 					}
 				}
-			}
-		}
-	}
-
-	ufTaskProcUsage = xCapacity / xPeriod;
-	ufTaskProcUsage++;
-	if(ufSchedulability * ufTaskProcUsage > 2) {
-		return errSCHEDULE_NOT_FEASIBLE;
-	}
-	ufSchedulability *= ufTaskProcUsage;
-
-	if( xPeriod <= xMin )
-	{
-		if( uxTopPriority < configMAX_PRIORITIES && xPeriod < xMin)
-		{
-			++uxTopPriority;
-		}
-		uxServerPriority = uxTopPriority;
-		xMin = xPeriod;
-	}
-	else if( xPeriod >= xMax )
-	{
-		if( xPeriod > xMax )
-		{
-			UBaseType_t j;
-			TCB_t *updateListPointer = listGET_OWNER_OF_HEAD_ENTRY( &xBatchedTasksList );
-			for( j = ( UBaseType_t ) 1U; j < uxTopPriority; j++ )
-			{
-				pxMins[j] = portMAX_DELAY;
-			}
-			for( j = ( UBaseType_t ) 0U; j < i; j++ )
-			{
-				if( updateListPointer->uxPriority < configMAX_PRIORITIES )
-				{
-					updateListPointer->uxPriority = updateListPointer->uxPriority + ( UBaseType_t ) 1U;
-				}
-				if( updateListPointer->xPeriod < pxMins[ updateListPointer->uxPriority ] )
-				{
-					pxMins[ updateListPointer->uxPriority ] = updateListPointer->xPeriod;
-				}
-				ListItem_t *pxNext = listGET_NEXT( &( updateListPointer->xStateListItem ) );
-				updateListPointer = listGET_LIST_ITEM_OWNER( pxNext );
-			}
-		}
-		uxServerPriority = ( UBaseType_t ) 1U;
-		xMax = xPeriod;
-	}
-	else
-	{
-		UBaseType_t j;
-		for( j = ( UBaseType_t ) 2U; j < uxTopPriority; j++ )
-		{
-			uxServerPriority = j - ( UBaseType_t ) 1U;
-			if( xPeriod > pxMins[ j ] )
-			{
-				break;
 			}
 		}
 	}
@@ -2242,6 +2186,26 @@ double ufTaskProcUsage;
 #endif /* ( ( INCLUDE_xTaskResumeFromISR == 1 ) && ( INCLUDE_vTaskSuspend == 1 ) ) */
 /*-----------------------------------------------------------*/
 
+BaseType_t xGetMaxServerCapacity( TickType_t * xCapacity, TickType_t xPeriod )
+{
+BaseType_t xReturn;
+
+	if(xSchedulerRunning != pdFALSE) {
+		return errSCHEDULER_RUNNING;
+	}
+
+	xReturn = xPrepareBatch();
+
+	if( xReturn != pdPASS )
+	{
+		return xReturn;
+	}
+	*xCapacity = ( TickType_t ) floor( ( 2 - ufSchedulability ) / ufSchedulability * xPeriod );
+
+	return xReturn;
+}
+/*-----------------------------------------------------------*/
+
 BaseType_t xSetServer( TickType_t xCapacity, TickType_t xPeriod )
 {
 BaseType_t xReturn;
@@ -2250,11 +2214,17 @@ BaseType_t xReturn;
 		return errSCHEDULER_RUNNING;
 	}
 
-	xReturn = xPrepareBatch( xCapacity, xPeriod );
+	xReturn = xPrepareBatch();
 
 	if( xReturn != pdPASS )
 	{
 		return xReturn;
+	}
+
+	double serverUsage = xCapacity / xPeriod;
+	if( ufSchedulability > ( 2 / ( serverUsage + 1 ) ) )
+	{
+		return errSCHEDULE_NOT_FEASIBLE;
 	}
 
 	xServerPeriod = xPeriod;
