@@ -147,9 +147,7 @@ configSERVER_TASK_NAME in FreeRTOSConfig.h. */
 			--uxTopPriority;																			\
 		}																								\
 																										\
-		/* listGET_OWNER_OF_NEXT_ENTRY indexes through the list, so the tasks of						\
-		the	same priority get an equal share of the processor time. */									\
-		listGET_OWNER_OF_NEXT_ENTRY( pxCurrentTCB, &( pxReadyTasksLists[ uxTopPriority ] ) );			\
+		pxCurrentTCB = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ uxTopPriority ] ) );			\
 		uxTopReadyPriority = uxTopPriority;																\
 	} /* taskSELECT_HIGHEST_PRIORITY_TASK */
 
@@ -1190,7 +1188,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 	#endif /* configUSE_TRACE_FACILITY */
 	traceTASK_CREATE( pxNewTCB );
 
-	if (pxNewTCB->pcTaskName != NULL && strcmp(pxNewTCB->pcTaskName, configIDLE_TASK_NAME) == 0)
+	if ( pxNewTCB->pcTaskName != NULL && strcmp( pxNewTCB->pcTaskName, configIDLE_TASK_NAME ) == 0 )
 	{
 		pxNewTCB->uxPriority = pxNewTCB->uxPriority | portPRIVILEGE_BIT;
 		#if ( configUSE_MUTEXES == 1 )
@@ -1218,7 +1216,10 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 			/* Event lists are always in priority order. */
 			listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) pxNewTCB->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
 			listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
-			if( pxNewTCB->xArrivalTime == xTickCount )
+
+			/* Minor optimisation.  Doesn't really matter if the tick count changes here. */
+			const TickType_t xConstTickCount = xTickCount;
+			if( pxNewTCB->xArrivalTime == xConstTickCount )
 			{
 				vListInsertEnd( &xAperiodicTasksList, &( ( pxNewTCB )->xStateListItem ) );
 				if( xSchedulerRunning != pdFALSE )
@@ -1226,15 +1227,47 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 					if( pxCurrentTCB->xPeriod > xServerPeriod )
 					{
 						pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
-						listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );
+						listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xConstTickCount + xServerPeriod );
 						pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
 						pxCurrentTCB = pxNewTCB;
 						pxCurrentTCB->uxPriority = uxServerPriority;
 					}
 				}
 			}
+			else
+			{
+				TickType_t xTimeToWake = pxNewTCB->xArrivalTime - xConstTickCount;
+
+				/* The list item will be inserted in wake time order. */
+				listSET_LIST_ITEM_VALUE( &( pxNewTCB->xStateListItem ), xTimeToWake );
+
+				if( xTimeToWake < xConstTickCount )
+				{
+					/* Wake time has overflowed.  Place this item in the overflow
+					list. */
+					vListInsert( pxOverflowDelayedTaskList, &( pxNewTCB->xStateListItem ) );
+				}
+				else
+				{
+					/* The wake time has not overflowed, so the current block list
+					is used. */
+					vListInsert( pxDelayedTaskList, &( pxNewTCB->xStateListItem ) );
+
+					/* If the task entering the blocked state was placed at the
+					head of the list of blocked tasks then xNextTaskUnblockTime
+					needs to be updated too. */
+					if( xTimeToWake < xNextTaskUnblockTime )
+					{
+						xNextTaskUnblockTime = xTimeToWake;
+					}
+					else
+					{
+						mtCOVERAGE_TEST_MARKER();
+					}
+				}
+			}
 		}
-		if( pxNewTCB->xPeriod != ( TickType_t ) 0U || pxNewTCB->xArrivalTime != xTickCount )
+		else
 		{
 			/* Pend tasks for the next batch order. */
 			vListInsertEnd( &xBatchedTasksList, &( ( pxNewTCB )->xStateListItem ) );
@@ -3033,26 +3066,6 @@ BaseType_t xSwitchRequired = pdFALSE;
 			}
 		}
 
-		for(;;)
-		{
-			if( listLIST_IS_EMPTY( &xBatchedTasksList ) != pdFALSE )
-			{
-				break;
-			}
-			pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &xBatchedTasksList );
-			if( pxTCB->xArrivalTime != xConstTickCount )
-			{
-				break;
-			}
-			( void ) uxListRemove( &( pxTCB->xStateListItem ) );
-			vListInsertEnd( &xAperiodicTasksList, &( ( pxTCB )->xStateListItem ) );
-
-			if ( pxCurrentTCB->xPeriod != ( TickType_t ) 0U && xServerPeriod > pxCurrentTCB->xPeriod )
-			{
-				xSwitchRequired = pdTRUE;
-			}
-		}
-
 		/* See if this tick has made a timeout expire.  Tasks are stored in
 		the	queue in the order of their wake time - meaning once one task
 		has been found whose block time has not expired there is no need to
@@ -3138,9 +3151,9 @@ BaseType_t xSwitchRequired = pdFALSE;
 					{
 						/* Preemption is on, but a context switch should
 						only be performed if the unblocked task has a
-						priority that is equal to or higher than the
+						priority that is higher than the
 						currently executing task. */
-						if( pxTCB->uxPriority >= pxCurrentTCB->uxPriority )
+						if( ( pxTCB->xPeriod == ( TickType_t ) 0U && xServerPeriod < pxCurrentTCB->xPeriod ) || pxTCB->xPeriod < pxCurrentTCB->xPeriod )
 						{
 							xSwitchRequired = pdTRUE;
 						}
@@ -3730,6 +3743,15 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 
 	for( ;; )
 	{
+		/*TCB_t *pxTCB;
+
+		listGET_OWNER_OF_NEXT_ENTRY( pxTCB, pxDelayedTaskList );
+		if ( pxTCB->xStackInitRequired )
+		{
+			pxTCB->xStackInitRequired = ( BaseType_t ) 0;
+			pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxOriginalTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
+		}*/
+
 		/* See if any tasks have deleted themselves - if so then the idle task
 		is responsible for freeing the deleted task's TCB and stack. */
 		prvCheckTasksWaitingTermination();
