@@ -3031,7 +3031,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 
 		if( ++uxCounter >= uxArraySize )
 		{
-			uxCounter = 0;
+			uxCounter = ( UBaseType_t ) 0U;
 		}
 		pxTaskArray[ uxCounter ] = ( TaskHandle_t ) pxCurrentTCB;
 		pxCapacityArray[ uxCounter ] = xServerCapacity;

@@ -352,10 +352,17 @@ static void vWriteStatsTask(void *pvParams)
 	  return;
 	}
 
-	for( BaseType_t i = ( BaseType_t ) 0; i < configGRANULARITY; i++ )
+	taskENTER_CRITICAL();
 	{
-		fprintf(statFile, "%lu %u\n", ( UBaseType_t ) pxTaskOverTime[ i ], pxCapacityOverTime[ i ] );
+		for( UBaseType_t i = ( UBaseType_t ) 0U; i < configGRANULARITY; i++ )
+		{
+			fprintf(statFile, "%lu %u\n", ( UBaseType_t ) pxTaskOverTime[ i ], pxCapacityOverTime[ i ] );
+		}
 	}
+	taskEXIT_CRITICAL();
+
+	fclose(statFile);
+	vTaskDelete(0);
 }
 
 int main( void )
@@ -374,7 +381,7 @@ int main( void )
 
 	BaseType_t xError = pdPASS;
 	TaskHandle_t xHandle;
-	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY, 1);
+	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY - 1, 1);
 	if( xError == pdPASS )
 	{
 		fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
