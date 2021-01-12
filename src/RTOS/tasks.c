@@ -112,12 +112,6 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 	#define configIDLE_TASK_NAME "IDLE"
 #endif
 
-/* The name allocated to the Server task.  This can be overridden by defining
-configSERVER_TASK_NAME in FreeRTOSConfig.h. */
-#ifndef configSERVER_TASK_NAME
-	#define configSERVER_TASK_NAME "SERVER"
-#endif
-
 #if ( configUSE_PORT_OPTIMISED_TASK_SELECTION == 0 )
 
 	/* If configUSE_PORT_OPTIMISED_TASK_SELECTION is 0 then task selection is
@@ -165,7 +159,6 @@ configSERVER_TASK_NAME in FreeRTOSConfig.h. */
 			if( xServerCapacity > ( TickType_t ) 0U && pxTCB->xPeriod > xServerPeriod && uxEmpty == pdFALSE )       \
 			{                                                                                                       \
 				pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );                                        \
-				pxTCB->uxPriority = uxServerPriority;                                                               \
 			}                                                                                                       \
 		}                                                                                                           \
 		else                                                                                                        \
@@ -395,25 +388,31 @@ typedef struct srvServerRefill
 	TickType_t xReleaseAmount; // RA
 } SR_t;
 
-// Why a queue? Because it's designed for smallish structs like the capacity filler
-// Capacity refilling is FIFO because a capacity refill queued later
-// will never unblock earlier than a capacity refill queued earlier
-// No malloc needed because the queue copies rather than using a reference
-// And there is a maximum amount of refills queued at one time,
-// which is period of server divided by 2 rounded up.
+/* If only I could've used a queue. */
+/* There is a maximum amount of refills queued at one time,
+which is period of server divided by 2 rounded up. */
 PRIVILEGED_DATA static List_t xRefillQueue;
 PRIVILEGED_DATA static List_t xAvailableRefills;
-// This is the designated struct that will be modified while the server is active
-// Once the server stops being active, the struct will be sent to the queue
+/* This is the pointer of the struct that will be modified while the server is active.
+Once the server stops being active or the capacity becomes 0, the struct will be sent to the queue.
+A new one will take its place in case the server is still supposed to be active. */
 PRIVILEGED_DATA static SR_t * pxActiveSR;
-// This value will change but will always get refilled to its initial state
+/* This value will change but will always get refilled to its initial state. */
 PRIVILEGED_DATA static TickType_t xServerCapacity = ( TickType_t ) 0U;
-// This value will stay static after initialization and will be used to calculate
-// the release tick in the capacity refill struct
+/* This value will stay static after initialization and will be used to calculate
+the release tick in the capacity refill struct. */
 PRIVILEGED_DATA static TickType_t xServerPeriod = ( TickType_t ) 0U;
-// This value will stay static after initialization and will be used for
-// time slicing
+/* This value will stay static after initialization and will be used for
+time slicing. This is no longer needed as time slicing is off. */
 PRIVILEGED_DATA static UBaseType_t uxServerPriority = tskIDLE_PRIORITY;
+
+/* These are the pointers for runtime data. */
+PRIVILEGED_DATA static TaskHandle_t * pxTaskArray;
+PRIVILEGED_DATA static TickType_t * pxCapacityArray;
+/* Information stays written until this amount of ticks. Use a similar interval as your runtime read/write task. */
+PRIVILEGED_DATA static UBaseType_t uxArraySize;
+/* Array counter. */
+PRIVILEGED_DATA static UBaseType_t uxCounter = ( UBaseType_t ) 0U;
 
 #if( INCLUDE_vTaskDelete == 1 )
 
@@ -1224,16 +1223,9 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 			if( pxNewTCB->xArrivalTime == xConstTickCount )
 			{
 				vListInsertEnd( &xAperiodicTasksList, &( ( pxNewTCB )->xStateListItem ) );
-				if( xSchedulerRunning != pdFALSE )
+				if( xSchedulerRunning != pdFALSE && pxCurrentTCB->xPeriod > xServerPeriod )
 				{
-					if( pxCurrentTCB->xPeriod > xServerPeriod )
-					{
-						pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
-						listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xConstTickCount + xServerPeriod );
-						pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
-						pxCurrentTCB = pxNewTCB;
-						pxCurrentTCB->uxPriority = uxServerPriority;
-					}
+					taskYIELD_IF_USING_PREEMPTION();
 				}
 			}
 			else
@@ -2189,7 +2181,7 @@ double ufTaskProcUsage;
 #endif /* ( ( INCLUDE_xTaskResumeFromISR == 1 ) && ( INCLUDE_vTaskSuspend == 1 ) ) */
 /*-----------------------------------------------------------*/
 
-BaseType_t xGetMaxServerCapacity( TickType_t * xCapacity, TickType_t xPeriod )
+BaseType_t xTaskCalcMaxServer( TickType_t * xCapacity, TickType_t xPeriod )
 {
 BaseType_t xReturn;
 
@@ -2209,7 +2201,7 @@ BaseType_t xReturn;
 }
 /*-----------------------------------------------------------*/
 
-BaseType_t xSetServer( TickType_t xCapacity, TickType_t xPeriod )
+BaseType_t xTaskSetServer( TickType_t xCapacity, TickType_t xPeriod )
 {
 BaseType_t xReturn;
 
@@ -2256,9 +2248,13 @@ BaseType_t xReturn;
 }
 /*-----------------------------------------------------------*/
 
-void vTaskStartScheduler( void )
+void vTaskStartScheduler( TaskHandle_t * pxTaskOverTime, TickType_t * pxCapacityOverTime, UBaseType_t uxGranularity )
 {
 BaseType_t xReturn;
+
+	pxTaskArray = pxTaskOverTime;
+	pxCapacityArray = pxCapacityOverTime;
+	uxArraySize = uxGranularity;
 
 	/* Add the idle task at the lowest priority. */
 	#if( configSUPPORT_STATIC_ALLOCATION == 1 )
@@ -2324,6 +2320,9 @@ BaseType_t xReturn;
 		/* Select a new task to run using either the generic C or port
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
+
+		pxTaskArray[ uxCounter ] = ( TaskHandle_t ) pxCurrentTCB;
+		pxCapacityArray[ uxCounter ] = xServerCapacity;
 	}
 	#endif /* configSUPPORT_STATIC_ALLOCATION */
 
@@ -3030,6 +3029,13 @@ BaseType_t xSwitchRequired = pdFALSE;
 			}
 		}
 
+		if( ++uxCounter >= uxArraySize )
+		{
+			uxCounter = 0;
+		}
+		pxTaskArray[ uxCounter ] = ( TaskHandle_t ) pxCurrentTCB;
+		pxCapacityArray[ uxCounter ] = xServerCapacity;
+
 		/* If an aperiodic task is currently using the server,
 		queue more capacity to be refilled. */
 		if( pxActiveSR != NULL && pxCurrentTCB->xPeriod == ( TickType_t ) 0U )
@@ -3051,9 +3057,6 @@ BaseType_t xSwitchRequired = pdFALSE;
 				xSwitchRequired = pdTRUE;
 			}
 		}
-
-		printf("%u\n", xConstTickCount);
-		fflush(stdout);
 
 		/* See if this tick has made a timeout expire.  Tasks are stored in
 		the	queue in the order of their wake time - meaning once one task
@@ -3377,15 +3380,9 @@ void vTaskSwitchContext( void )
 		}
 		#endif
 
-		printf("o\n");
-		fflush(stdout);
-
 		/* Select a new task to run using either the generic C or port
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
-
-		printf("o\n");
-		fflush(stdout);
 
 		traceTASK_SWITCHED_IN();
 

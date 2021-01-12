@@ -341,7 +341,7 @@ is used in assert() statements. */
 /**
  * task. h
  *<pre>
- BaseType_t xSetServer( TickType_t xCapacity, TickType_t xServer );</pre>
+ BaseType_t xTaskSetServer( TickType_t xCapacity, TickType_t xServer );</pre>
  *
  * Set the parameters of the server.
  *
@@ -357,18 +357,18 @@ is used in assert() statements. */
  void vOtherFunction( void )
  {
 	 // Initializes the server with the given parameters.
-	 xSetServer(xCapacity, xPeriod);
+	 xTaskSetServer(xCapacity, xPeriod);
  }
    </pre>
- * \defgroup xSetServer xSetServer
+ * \defgroup xTaskSetServer xTaskSetServer
  * \ingroup Tasks
  */
-BaseType_t xSetServer( TickType_t xCapacity, TickType_t xPeriod ) PRIVILEGED_FUNCTION;
+BaseType_t xTaskSetServer( TickType_t xCapacity, TickType_t xPeriod ) PRIVILEGED_FUNCTION;
 
 /**
  * task. h
  *<pre>
- BaseType_t xGetMaxServerCapacity( TickType_t * xCapacity, TickType_t xPeriod );</pre>
+ BaseType_t xTaskCalcMaxServer( TickType_t * xCapacity, TickType_t xPeriod );</pre>
  *
  * Get the maximum possible capacity of the server for the given set of tasks and server period.
  *
@@ -383,13 +383,13 @@ BaseType_t xSetServer( TickType_t xCapacity, TickType_t xPeriod ) PRIVILEGED_FUN
  void vOtherFunction( void )
  {
 	 // Initializes the server with the given parameters.
-	 xGetMaxServerCapacity(&xCapacity, xPeriod);
+	 xTaskCalcMaxServer(&xCapacity, xPeriod);
  }
    </pre>
- * \defgroup xGetMaxServerCapacity xGetMaxServerCapacity
+ * \defgroup xTaskCalcMaxServer xTaskCalcMaxServer
  * \ingroup Tasks
  */
-BaseType_t xGetMaxServerCapacity( TickType_t * xCapacity, TickType_t xPeriod ) PRIVILEGED_FUNCTION;
+BaseType_t xTaskCalcMaxServer( TickType_t * xCapacity, TickType_t xPeriod ) PRIVILEGED_FUNCTION;
 
 /**
  * task. h
@@ -1228,7 +1228,7 @@ BaseType_t xTaskResumeFromISR( TaskHandle_t xTaskToResume ) PRIVILEGED_FUNCTION;
  * \defgroup vTaskStartScheduler vTaskStartScheduler
  * \ingroup SchedulerControl
  */
-void vTaskStartScheduler( void ) PRIVILEGED_FUNCTION;
+void vTaskStartScheduler( TaskHandle_t * pxTaskOverTime, TickType_t * pxCapacityOverTime, UBaseType_t uxGranularity ) PRIVILEGED_FUNCTION;
 
 /**
  * task. h
