@@ -314,6 +314,10 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 			else
 			{
 				xError = xTaskCalcMaxServer(&xCapacity, xPeriod);
+				if(xError == pdPASS)
+				{
+					fprintf(writeFile, "%u\n", xCapacity);
+				}
 			}
 		}
 		else if(xCommand == commSINIT)
@@ -367,18 +371,15 @@ static void vWriteStatsTask(void *pvParams)
 
 int main( void )
 {
-	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
-	//xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
-
 	// Need tasks with computation times: 1, 4, 2
 
-	//xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 0, 1);
-
+	/* Production configuration */
 	//FILE *readFile = stdin;
 	FILE *writeFile = stderr;
 	//input_handler(readFile, writeFile);
 	//vTaskStartScheduler();
 
+	/* Stat writing */
 	BaseType_t xError = pdPASS;
 	TaskHandle_t xHandle;
 	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY - 1, 1);
@@ -387,6 +388,9 @@ int main( void )
 		fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
 	}
 
+	/* Test configuration */
+	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
+	//xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
 	xError = xTaskSetServer(5, 10);
 	if(xError == pdPASS) {
 		vTaskStartScheduler( pxTaskOverTime, pxCapacityOverTime, configGRANULARITY );
