@@ -136,49 +136,51 @@ configSERVER_TASK_NAME in FreeRTOSConfig.h. */
 
 	/*-----------------------------------------------------------*/
 
-	#define taskSELECT_HIGHEST_PRIORITY_TASK()															\
-	{																									\
-	UBaseType_t uxTopPriority = uxTopReadyPriority;														\
-																										\
-		/* Find the highest priority queue that contains ready tasks. */								\
-		while( listLIST_IS_EMPTY( &( pxReadyTasksLists[ uxTopPriority ] ) ) )							\
-		{																								\
-			configASSERT( uxTopPriority );																\
-			--uxTopPriority;																			\
-		}																								\
-																										\
-		pxCurrentTCB = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ uxTopPriority ] ) );			\
-		uxTopReadyPriority = uxTopPriority;																\
+	#define taskSELECT_HIGHEST_PRIORITY_TASK()													                    \
+	{																									            \
+	TCB_t * pxTCB;                                                                                                  \
+	UBaseType_t uxEmpty = listLIST_IS_EMPTY( &xAperiodicTasksList );                                                \
+	UBaseType_t uxTopPriority = uxTopReadyPriority;														            \
+																										            \
+		/* Find the highest priority queue that contains ready tasks. */								            \
+		while( listLIST_IS_EMPTY( &( pxReadyTasksLists[ uxTopPriority ] ) ) )							            \
+		{																								            \
+			configASSERT( uxTopPriority );																            \
+			--uxTopPriority;																			            \
+		}																								            \
+																										            \
+		pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ uxTopPriority ] ) );			                    \
+		uxTopReadyPriority = uxTopPriority;																            \
+		if( pxTCB->xPeriod < xServerPeriod || uxEmpty != pdFALSE )                                                  \
+		{                                                                                                           \
+			if( pxActiveSR == NULL )                                                                                \
+			{                                                                                                       \
+				pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );                                     \
+				if( xServerCapacity > ( TickType_t ) 0U )                                                           \
+				{                                                                                                   \
+					listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );   \
+				}                                                                                                   \
+				pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;                                                     \
+			}                                                                                                       \
+			if( xServerCapacity > ( TickType_t ) 0U && pxTCB->xPeriod > xServerPeriod && uxEmpty == pdFALSE )       \
+			{                                                                                                       \
+				pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );                                        \
+				pxTCB->uxPriority = uxServerPriority;                                                               \
+			}                                                                                                       \
+		}                                                                                                           \
+		else                                                                                                        \
+		{                                                                                                           \
+			if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                                                    \
+			{                                                                                                       \
+				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );                                     \
+				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );                             \
+			}                                                                                                       \
+			pxActiveSR = NULL;                                                                                      \
+		}                                                                                                           \
+		pxCurrentTCB = pxTCB;                                                                                       \
 	} /* taskSELECT_HIGHEST_PRIORITY_TASK */
 
 	/*-----------------------------------------------------------*/
-	#define taskSELECT_APERIODIC_IF_NEEDED()                                                                          \
-	{                                                                                                                 \
-		UBaseType_t uxEmpty = listLIST_IS_EMPTY( &xAperiodicTasksList );                                              \
-		if( xServerCapacity == ( TickType_t ) 0U || ( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty != pdFALSE ) ) \
-		{                                                                                                             \
-			if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                                                      \
-			{                                                                                                         \
-				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );                                       \
-				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );                               \
-			}                                                                                                         \
-			pxActiveSR = NULL;                                                                                        \
-		}                                                                                                             \
-		else                                                                                                          \
-		{                                                                                                             \
-			if( pxActiveSR == NULL )                                                                                  \
-			{                                                                                                         \
-				pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );                                       \
-				listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );         \
-				pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;                                                       \
-			}                                                                                                         \
-			if( pxCurrentTCB->xPeriod > xServerPeriod && uxEmpty == pdFALSE )                                         \
-			{                                                                                                         \
-				pxCurrentTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );                                   \
-				pxCurrentTCB->uxPriority = uxServerPriority;                                                          \
-			}                                                                                                         \
-		}																									          \
-	} /* taskSELECT_APERIODIC_IF_NEEDED */
 
 	/* Define away taskRESET_READY_PRIORITY() and portRESET_READY_PRIORITY() as
 	they are only required when a port optimised method of task selection is
@@ -2322,8 +2324,6 @@ BaseType_t xReturn;
 		/* Select a new task to run using either the generic C or port
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
-
-		taskSELECT_APERIODIC_IF_NEEDED();
 	}
 	#endif /* configSUPPORT_STATIC_ALLOCATION */
 
@@ -3021,6 +3021,11 @@ BaseType_t xSwitchRequired = pdFALSE;
 			{
 				( void ) uxListRemove( &( pxSR->xReleaseTimeListItem ) );
 				vListInsertEnd( &xAvailableRefills, &( pxSR->xReleaseTimeListItem ) );
+				/* RT is set when the server is active and the capacity is higher than 0. */
+				if( xServerCapacity == (TickType_t) 0U && pxActiveSR != NULL )
+				{
+					listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xConstTickCount + xServerPeriod );
+				}
 				xServerCapacity += pxSR->xReleaseAmount;
 			}
 		}
@@ -3033,9 +3038,22 @@ BaseType_t xSwitchRequired = pdFALSE;
 			xServerCapacity--;
 			if( xServerCapacity == ( TickType_t ) 0U )
 			{
+				/* RA is calculated when the server is inactive or the capacity is 0. */
+				if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )
+				{
+					( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );
+					vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );
+					/* The server might still be active, in which case we need to have a SR ready. */
+					pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
+					pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
+				}
+				/* If the capacity is 0, we can't serve the aperiodic task anymore. */
 				xSwitchRequired = pdTRUE;
 			}
 		}
+
+		printf("%u\n", xConstTickCount);
+		fflush(stdout);
 
 		/* See if this tick has made a timeout expire.  Tasks are stored in
 		the	queue in the order of their wake time - meaning once one task
@@ -3359,11 +3377,15 @@ void vTaskSwitchContext( void )
 		}
 		#endif
 
+		printf("o\n");
+		fflush(stdout);
+
 		/* Select a new task to run using either the generic C or port
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
 
-		taskSELECT_APERIODIC_IF_NEEDED();
+		printf("o\n");
+		fflush(stdout);
 
 		traceTASK_SWITCHED_IN();
 
