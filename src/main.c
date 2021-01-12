@@ -25,6 +25,8 @@
 #define errBADINPUT         -1001
 #define errNOTFOUND         -1002
 
+// Need tasks with computation times: 1, 4, 2
+
 static void task0(void *pvParams)
 {
 	printf("+");
@@ -371,13 +373,8 @@ static void vWriteStatsTask(void *pvParams)
 
 int main( void )
 {
-	// Need tasks with computation times: 1, 4, 2
-
-	/* Production configuration */
-	//FILE *readFile = stdin;
+	FILE *readFile = stdin;
 	FILE *writeFile = stderr;
-	//input_handler(readFile, writeFile);
-	//vTaskStartScheduler();
 
 	/* Stat writing */
 	BaseType_t xError = pdPASS;
@@ -388,13 +385,17 @@ int main( void )
 		fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
 	}
 
+	/* Production configuration */
+	input_handler(readFile, writeFile);
+	vTaskStartScheduler();
+
 	/* Test configuration */
-	xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
-	//xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
+	/*xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
+	xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
 	xError = xTaskSetServer(5, 10);
 	if(xError == pdPASS) {
 		vTaskStartScheduler( pxTaskOverTime, pxCapacityOverTime, configGRANULARITY );
-	}
+	}*/
 
 	return 0;
 

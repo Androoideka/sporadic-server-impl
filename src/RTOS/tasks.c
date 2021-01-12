@@ -1371,7 +1371,7 @@ double ufTaskProcUsage;
 
 			/* If a periodic task is deleting itself then that means it
 			expects to be reinitialised. */
-			if( pxTCB == pxCurrentTCB && pxTCB->xPeriod > ( TickType_t ) 0U )
+			if( xTaskToDelete == NULL && pxTCB->xPeriod > ( TickType_t ) 0U )
 			{
 				pxTCB->xStackInitRequired++;
 				pxTCB->xArrivalTime = pxTCB->xArrivalTime + pxTCB->xPeriod;
