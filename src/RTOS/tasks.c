@@ -1004,7 +1004,7 @@ UBaseType_t x;
 
 	pxNewTCB->pxTaskCode = pxTaskCode;
 	pxNewTCB->pvParameters = pvParameters;
-	pxNewTCB->xStackInitRequired = 0;
+	pxNewTCB->xStackInitRequired = ( BaseType_t ) 0;
 	pxNewTCB->uxPriority = tskIDLE_PRIORITY;
 	pxNewTCB->xArrivalTime = xArrivalTime;
 	pxNewTCB->xPeriod = xPeriod;
@@ -1369,81 +1369,82 @@ double ufTaskProcUsage;
 	{
 	TCB_t *pxTCB;
 
-		/* If null is passed in here then it is the calling task that is
-		being deleted. */
-		pxTCB = prvGetTCBFromHandle( xTaskToDelete );
-
-		/* If a periodic task is deleting itself then that means it
-		expects to be reinitialised. */
-		if( xTaskToDelete == NULL && pxTCB->xPeriod > ( TickType_t ) 0U )
-		{
-			pxTCB->xStackInitRequired = ( BaseType_t ) 1;
-			vTaskDelayUntil( &( pxTCB->xArrivalTime ), pxTCB->xPeriod );
-			return;
-		}
-
-		/* A critical section is only entered here because xPeriod does not change
-		and ArrivalTime is passed as a pointer */
 		taskENTER_CRITICAL();
 		{
-			/* Remove task from the ready list. */
-			if( uxListRemove( &( pxTCB->xStateListItem ) ) == ( UBaseType_t ) 0 )
+			/* If null is passed in here then it is the calling task that is
+			being deleted. */
+			pxTCB = prvGetTCBFromHandle( xTaskToDelete );
+
+			/* If a periodic task is deleting itself then that means it
+			expects to be reinitialised. */
+			if( pxTCB == pxCurrentTCB && pxTCB->xPeriod > ( TickType_t ) 0U )
 			{
-				taskRESET_READY_PRIORITY( pxTCB->uxPriority );
+				pxTCB->xStackInitRequired++;
+				pxTCB->xArrivalTime = pxTCB->xArrivalTime + pxTCB->xPeriod;
+				prvAddCurrentTaskToDelayedList( pxTCB->xArrivalTime - xTickCount, pdFALSE );
+				//portPRE_TASK_DELETE_HOOK( pxTCB, &xYieldPending );
 			}
 			else
 			{
-				mtCOVERAGE_TEST_MARKER();
+				/* Remove task from the ready list. */
+				if( uxListRemove( &( pxTCB->xStateListItem ) ) == ( UBaseType_t ) 0 )
+				{
+					taskRESET_READY_PRIORITY( pxTCB->uxPriority );
+				}
+				else
+				{
+					mtCOVERAGE_TEST_MARKER();
+				}
+
+				/* Is the task waiting on an event also? */
+				if( listLIST_ITEM_CONTAINER( &( pxTCB->xEventListItem ) ) != NULL )
+				{
+					( void ) uxListRemove( &( pxTCB->xEventListItem ) );
+				}
+				else
+				{
+					mtCOVERAGE_TEST_MARKER();
+				}
+
+				/* Increment the uxTaskNumber also so kernel aware debuggers can
+				detect that the task lists need re-generating.  This is done before
+				portPRE_TASK_DELETE_HOOK() as in the Windows port that macro will
+				not return. */
+				uxTaskNumber++;
+
+				if( pxTCB == pxCurrentTCB )
+				{
+					/* A task is deleting itself.  This cannot complete within the
+					task itself, as a context switch to another task is required.
+					Place the task in the termination list.  The idle task will
+					check the termination list and free up any memory allocated by
+					the scheduler for the TCB and stack of the deleted task. */
+					vListInsertEnd( &xTasksWaitingTermination, &( pxTCB->xStateListItem ) );
+
+					/* Increment the ucTasksDeleted variable so the idle task knows
+					there is a task that has been deleted and that it should therefore
+					check the xTasksWaitingTermination list. */
+					++uxDeletedTasksWaitingCleanUp;
+
+					/* The pre-delete hook is primarily for the Windows simulator,
+					in which Windows specific clean up operations are performed,
+					after which it is not possible to yield away from this task -
+					hence xYieldPending is used to latch that a context switch is
+					required. */
+					portPRE_TASK_DELETE_HOOK( pxTCB, &xYieldPending );
+				}
+				else
+				{
+					--uxCurrentNumberOfTasks;
+					prvDeleteTCB( pxTCB );
+
+					/* Reset the next expected unblock time in case it referred to
+					the task that has just been deleted. */
+					prvResetNextTaskUnblockTime();
+				}
+
+				traceTASK_DELETE( pxTCB );
 			}
-
-			/* Is the task waiting on an event also? */
-			if( listLIST_ITEM_CONTAINER( &( pxTCB->xEventListItem ) ) != NULL )
-			{
-				( void ) uxListRemove( &( pxTCB->xEventListItem ) );
-			}
-			else
-			{
-				mtCOVERAGE_TEST_MARKER();
-			}
-
-			/* Increment the uxTaskNumber also so kernel aware debuggers can
-			detect that the task lists need re-generating.  This is done before
-			portPRE_TASK_DELETE_HOOK() as in the Windows port that macro will
-			not return. */
-			uxTaskNumber++;
-
-			if( pxTCB == pxCurrentTCB )
-			{
-				/* A task is deleting itself.  This cannot complete within the
-				task itself, as a context switch to another task is required.
-				Place the task in the termination list.  The idle task will
-				check the termination list and free up any memory allocated by
-				the scheduler for the TCB and stack of the deleted task. */
-				vListInsertEnd( &xTasksWaitingTermination, &( pxTCB->xStateListItem ) );
-
-				/* Increment the ucTasksDeleted variable so the idle task knows
-				there is a task that has been deleted and that it should therefore
-				check the xTasksWaitingTermination list. */
-				++uxDeletedTasksWaitingCleanUp;
-
-				/* The pre-delete hook is primarily for the Windows simulator,
-				in which Windows specific clean up operations are performed,
-				after which it is not possible to yield away from this task -
-				hence xYieldPending is used to latch that a context switch is
-				required. */
-				portPRE_TASK_DELETE_HOOK( pxTCB, &xYieldPending );
-			}
-			else
-			{
-				--uxCurrentNumberOfTasks;
-				prvDeleteTCB( pxTCB );
-
-				/* Reset the next expected unblock time in case it referred to
-				the task that has just been deleted. */
-				prvResetNextTaskUnblockTime();
-			}
-
-			traceTASK_DELETE( pxTCB );
 		}
 		taskEXIT_CRITICAL();
 
@@ -3096,7 +3097,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 					task deleting itself. */
 					if( pxTCB->xStackInitRequired )
 					{
-						pxTCB->xStackInitRequired = ( BaseType_t ) 0;
+						pxTCB->xStackInitRequired--;
 						pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxOriginalTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
 					}
 
@@ -3713,14 +3714,18 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 
 	for( ;; )
 	{
-		/*TCB_t *pxTCB;
+		TCB_t *pxTCB;
 
+		taskENTER_CRITICAL();
 		listGET_OWNER_OF_NEXT_ENTRY( pxTCB, pxDelayedTaskList );
-		if ( pxTCB->xStackInitRequired )
 		{
-			pxTCB->xStackInitRequired = ( BaseType_t ) 0;
-			pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxOriginalTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
-		}*/
+			if ( pxTCB->xStackInitRequired )
+			{
+				pxTCB->xStackInitRequired--;
+				pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxOriginalTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
+			}
+		}
+		taskEXIT_CRITICAL();
 
 		/* See if any tasks have deleted themselves - if so then the idle task
 		is responsible for freeing the deleted task's TCB and stack. */
