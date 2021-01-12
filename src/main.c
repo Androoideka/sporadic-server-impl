@@ -25,14 +25,14 @@
 #define errBADINPUT         -1001
 #define errNOTFOUND         -1002
 
-void task0(void *pvParams)
+static void task0(void *pvParams)
 {
 	printf("+");
 	fflush(stdout);
 	vTaskDelete(0);
 }
 
-void task1(void *pvParams)
+static void task1(void *pvParams)
 {
 	printf("-");
 	fflush(stdout);
@@ -161,7 +161,7 @@ static void exception_handler(BaseType_t xError, FILE *file)
 	return result;
 } For later, in case numbers need to be read as parameters */
 
-void input_handler(FILE *readFile, FILE *writeFile) {
+static void input_handler(FILE *readFile, FILE *writeFile) {
 	for(;;)
 	{
 		BaseType_t xError = pdPASS;
@@ -337,8 +337,26 @@ void input_handler(FILE *readFile, FILE *writeFile) {
 	}
 }
 
-TaskHandle_t pxTaskOverTime[configGRANULARITY];
-TickType_t pxCapacityOverTime[configGRANULARITY];
+static TaskHandle_t pxTaskOverTime[configGRANULARITY];
+static TickType_t pxCapacityOverTime[configGRANULARITY];
+
+static void vWriteStatsTask(void *pvParams)
+{
+	FILE *statFile;
+	statFile = fopen("log.txt", "w");
+
+	if (statFile == NULL)
+	{
+	  printf("Error while opening file\n");
+	  fflush(stdout);
+	  return;
+	}
+
+	for( BaseType_t i = ( BaseType_t ) 0; i < configGRANULARITY; i++ )
+	{
+		fprintf(statFile, "%lu %u\n", ( UBaseType_t ) pxTaskOverTime[ i ], pxCapacityOverTime[ i ] );
+	}
+}
 
 int main( void )
 {
@@ -349,10 +367,20 @@ int main( void )
 
 	//xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 0, 1);
 
-	//input_handler(stdin, stderror);
+	//FILE *readFile = stdin;
+	FILE *writeFile = stderr;
+	//input_handler(readFile, writeFile);
 	//vTaskStartScheduler();
 
-	BaseType_t xError = xTaskSetServer(5, 10);
+	BaseType_t xError = pdPASS;
+	TaskHandle_t xHandle;
+	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY, 1);
+	if( xError == pdPASS )
+	{
+		fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
+	}
+
+	xError = xTaskSetServer(5, 10);
 	if(xError == pdPASS) {
 		vTaskStartScheduler( pxTaskOverTime, pxCapacityOverTime, configGRANULARITY );
 	}
