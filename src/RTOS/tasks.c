@@ -435,7 +435,6 @@ the errno of the currently running task. */
 
 /* Other file private variables. --------------------------------*/
 PRIVILEGED_DATA static volatile UBaseType_t uxCurrentNumberOfTasks 	= ( UBaseType_t ) 0U;
-PRIVILEGED_DATA static double ufSchedulability                      = 0;
 PRIVILEGED_DATA static volatile TickType_t xTickCount 				= ( TickType_t ) configINITIAL_TICK_COUNT;
 PRIVILEGED_DATA static volatile UBaseType_t uxTopReadyPriority 		= tskIDLE_PRIORITY;
 PRIVILEGED_DATA static volatile BaseType_t xSchedulerRunning 		= pdFALSE;
@@ -445,6 +444,8 @@ PRIVILEGED_DATA static volatile BaseType_t xNumOfOverflows 			= ( BaseType_t ) 0
 PRIVILEGED_DATA static UBaseType_t uxTaskNumber 					= ( UBaseType_t ) 0U;
 PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime		= ( TickType_t ) 0U; /* Initialised to portMAX_DELAY before the scheduler starts. */
 PRIVILEGED_DATA static TaskHandle_t xIdleTaskHandle					= NULL;			/*< Holds the handle of the idle task.  The idle task is created automatically when the scheduler is started. */
+
+PRIVILEGED_DATA static double ufSchedulability;
 
 /* Context switches are held pending while the scheduler is suspended.  Also,
 interrupts must not manipulate the xStateListItem of a TCB, or any of the
@@ -1279,6 +1280,8 @@ TCB_t *listPointer;
 TickType_t xMin = portMAX_DELAY, xMax = ( TickType_t ) 0U, pxMins[configMAX_PRIORITIES];
 UBaseType_t uxTopPriority = uxTopReadyPriority;
 double ufTaskProcUsage;
+
+	ufSchedulability = 1;
 
 	if(uxBatchSize < ( UBaseType_t ) 1U)
 	{

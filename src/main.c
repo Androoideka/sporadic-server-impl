@@ -107,7 +107,7 @@ static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 	}
 }
 
-static TickType_t get_computation_time(char pcString[])
+static TickType_t xGetComputationTime(char pcString[])
 {
 	if(strcmp(pcString, "task1") == 0)
 	{
@@ -129,37 +129,24 @@ static TickType_t get_computation_time(char pcString[])
 
 static void exception_handler(BaseType_t xError, FILE *file)
 {
-	if(xError == pdPASS)
-		return;
-	if(xError == errSCHEDULER_RUNNING)
-		fprintf(file, "Cannot execute this command while the scheduler is active.\n");
-	else if(xError == errSCHEDULE_NOT_FEASIBLE)
-		fprintf(file, "Schedule was not feasible with given set of tasks and server parameters.\n");
-	else if(xError == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY)
-		fprintf(file, "Couldn't allocate required memory.\n");
-	else if(xError == errNOTFOUND)
-		fprintf(file, "Couldn't find desired item.\n");
-	else if(xError == errINVALIDCOMMAND)
-		fprintf(file, "Your command wasn't recognized.\n");
-	else if(xError == errMISSINGPARAM)
-		fprintf(file, "Command is missing additional parameters.\n");
-	else if(xError == errBADINPUT)
-		fprintf(file, "Parameters couldn't be read properly.\n");
+	if(xError == pdPASS) {
+		if(xError == errSCHEDULER_RUNNING)
+			fprintf(file, "Cannot execute this command while the scheduler is active.\n");
+		else if(xError == errSCHEDULE_NOT_FEASIBLE)
+			fprintf(file, "Schedule was not feasible with given set of tasks and server parameters.\n");
+		else if(xError == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY)
+			fprintf(file, "Couldn't allocate required memory.\n");
+		else if(xError == errNOTFOUND)
+			fprintf(file, "Couldn't find desired item.\n");
+		else if(xError == errINVALIDCOMMAND)
+			fprintf(file, "Your command wasn't recognized.\n");
+		else if(xError == errMISSINGPARAM)
+			fprintf(file, "Command is missing additional parameters.\n");
+		else if(xError == errBADINPUT)
+			fprintf(file, "Parameters couldn't be read properly.\n");
+	}
 	fflush(file);
 }
-
-/*static int filter_number(char string[])
-{
-	int result;
-	char* end;
-
-	result = strtol(string, &end, 0);
-	if(result == 0 || strlen(end) > 0)
-	{
-		return errBADINPUT;
-	}
-	return result;
-} For later, in case numbers need to be read as parameters */
 
 static void input_handler(FILE *readFile, FILE *writeFile) {
 	for(;;)
@@ -180,7 +167,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 			xCommand = commREMOV;
 		else if(strcmp(pcCommand, "get_max_server_capacity") == 0)
 			xCommand = commSCHCK;
-		else if(strcmp(pcCommand, "initialize_server") == 0)
+		else if(strcmp(pcCommand, "initialise_server") == 0)
 			xCommand = commSINIT;
 		else
 			xError = errINVALIDCOMMAND;
@@ -304,9 +291,9 @@ static void vWriteStatsTask(void *pvParams)
 
 	if (statFile == NULL)
 	{
-	  printf("Error while opening file\n");
-	  fflush(stdout);
-	  return;
+		printf("Error while opening file\n");
+		fflush(stdout);
+		return;
 	}
 
 	taskENTER_CRITICAL();
