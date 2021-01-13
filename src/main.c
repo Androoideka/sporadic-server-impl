@@ -41,6 +41,42 @@ static void task1(void *pvParams)
 	vTaskDelete(0);
 }
 
+static void vTask1(void *pvParams)
+{
+	TickType_t startTick = xTaskGetTickCount();
+	for(int i = 0; i < 1300000; i++) {
+		double o = 421634/2341;
+	}
+	TickType_t endTick = xTaskGetTickCount();
+	printf("%d\n", endTick - startTick);
+	fflush(stdout);
+	vTaskDelete(0);
+}
+
+static void vTask2(void *pvParams)
+{
+	TickType_t startTick = xTaskGetTickCount();
+	for(int i = 0; i < 2600000; i++) {
+		double o = 421634/2341;
+	}
+	TickType_t endTick = xTaskGetTickCount();
+	printf("%d\n", endTick - startTick);
+	fflush(stdout);
+	vTaskDelete(0);
+}
+
+static void vTask4(void *pvParams)
+{
+	TickType_t startTick = xTaskGetTickCount();
+	for(int i = 0; i < 5000000; i++) {
+		double o = 421634/2341;
+	}
+	TickType_t endTick = xTaskGetTickCount();
+	printf("%d\n", endTick - startTick);
+	fflush(stdout);
+	vTaskDelete(0);
+}
+
 static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 {
 	if(strcmp(pcString, "task0") == 0)
@@ -50,6 +86,18 @@ static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 	else if(strcmp(pcString, "task1") == 0)
 	{
 		return task1;
+	}
+	else if(strcmp(pcString, "vTask1") == 0)
+	{
+		return vTask1;
+	}
+	else if(strcmp(pcString, "vTask2") == 0)
+	{
+		return vTask2;
+	}
+	else if(strcmp(pcString, "vTask4") == 0)
+	{
+		return vTask4;
 	}
 	else
 	{
@@ -66,6 +114,18 @@ static TickType_t xGetComputationTime(char pcString[])
 	else if(strcmp(pcString, "task1") == 0)
 	{
 		return 1;
+	}
+	else if(strcmp(pcString, "vTask1") == 0)
+	{
+		return 1;
+	}
+	else if(strcmp(pcString, "vTask2") == 0)
+	{
+		return 2;
+	}
+	else if(strcmp(pcString, "vTask4") == 0)
+	{
+		return 4;
 	}
 	else
 	{
@@ -129,11 +189,13 @@ static TickType_t xGetComputationTime(char pcString[])
 
 static void exception_handler(BaseType_t xError, FILE *file)
 {
-	if(xError == pdPASS) {
+	if(xError != pdPASS) {
 		if(xError == errSCHEDULER_RUNNING)
 			fprintf(file, "Cannot execute this command while the scheduler is active.\n");
 		else if(xError == errSCHEDULE_NOT_FEASIBLE)
-			fprintf(file, "Schedule was not feasible with given set of tasks and server parameters.\n");
+			fprintf(file, "Schedule was not feasible with given set of tasks. Your batch has been dropped.\n");
+		else if(xError == errSERVER_NOT_FEASIBLE)
+			fprintf(file, "Schedule was not feasible with given server parameters.\n");
 		else if(xError == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY)
 			fprintf(file, "Couldn't allocate required memory.\n");
 		else if(xError == errNOTFOUND)
@@ -163,7 +225,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 			xCommand = commADDAB;
 		else if(strcmp(pcCommand, "add_task") == 0)
 			xCommand = commADDAN;
-		else if(strcmp(pcCommand, "remove_task") == 0)
+		else if(strcmp(pcCommand, "stop_task") == 0)
 			xCommand = commREMOV;
 		else if(strcmp(pcCommand, "get_max_server_capacity") == 0)
 			xCommand = commSCHCK;
@@ -315,26 +377,17 @@ int main( void )
 	FILE *writeFile = stderr;
 
 	/* Stat writing */
-	BaseType_t xError = pdPASS;
+	/*BaseType_t xError = pdPASS;
 	TaskHandle_t xHandle;
 	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY - 1, 1);
 	if( xError == pdPASS )
 	{
 		fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
 		fflush(writeFile);
-	}
+	}*/
 
-	/* Production configuration */
 	input_handler(readFile, writeFile);
 	vTaskStartScheduler(pxTaskOverTime, pxCapacityOverTime, configGRANULARITY);
-
-	/* Test configuration */
-	/*xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);
-	xTaskCreate(task0, "0", configMINIMAL_STACK_SIZE, NULL, 0, 0, 4, 1);
-	xError = xTaskSetServer(5, 10);
-	if(xError == pdPASS) {
-		vTaskStartScheduler( pxTaskOverTime, pxCapacityOverTime, configGRANULARITY );
-	}*/
 
 	return 0;
 

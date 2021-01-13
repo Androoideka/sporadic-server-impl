@@ -641,6 +641,11 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
 static BaseType_t xPrepareBatch ( void ) PRIVILEGED_FUNCTION;
 
 /*
+ * Drop tasks queued in the batch in case it's not schedulable.
+ */
+static void xDropBatch ( void ) PRIVILEGED_FUNCTION;
+
+/*
  * freertos_tasks_c_additions_init() should only be called if the user definable
  * macro FREERTOS_TASKS_C_ADDITIONS_INIT() is defined, as that is the only macro
  * called by the function.
@@ -1357,6 +1362,20 @@ double ufTaskProcUsage;
 	}
 
 	return pdPASS;
+}
+/*-----------------------------------------------------------*/
+
+static void xDropBatch( void )
+{
+	UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
+	TCB_t *listPointer;
+	for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
+	{
+		listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
+		/* Remove task from the batch list. */
+		uxListRemove( &( listPointer->xStateListItem ) );
+		prvDeleteTCB( listPointer );
+	}
 }
 /*-----------------------------------------------------------*/
 
@@ -2213,16 +2232,16 @@ BaseType_t xReturn;
 	}
 
 	xReturn = xPrepareBatch();
-
 	if( xReturn != pdPASS )
 	{
+		xDropBatch();
 		return xReturn;
 	}
 
 	double serverUsage = xCapacity / xPeriod;
 	if( ufSchedulability > ( 2 / ( serverUsage + 1 ) ) )
 	{
-		return errSCHEDULE_NOT_FEASIBLE;
+		return errSERVER_NOT_FEASIBLE;
 	}
 
 	xServerPeriod = xPeriod;
