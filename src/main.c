@@ -20,7 +20,7 @@
 #define COMMAND_SIZE        17
 #define FUNC_NAME_SIZE      17
 
-#define errINVALIDCOMMAND   -1
+#define errINVALIDCOMMAND   -100
 #define errMISSINGPARAM     -1000
 #define errBADINPUT         -1001
 #define errNOTFOUND         -1002
@@ -132,21 +132,19 @@ static void exception_handler(BaseType_t xError, FILE *file)
 	if(xError == pdPASS)
 		return;
 	if(xError == errSCHEDULER_RUNNING)
-		fprintf(file, "Cannot add periodic tasks while scheduler is running.");
-	if(xError == errSCHEDULE_NOT_FEASIBLE)
+		fprintf(file, "Cannot execute this command while the scheduler is active.\n");
+	else if(xError == errSCHEDULE_NOT_FEASIBLE)
 		fprintf(file, "Schedule was not feasible with given set of tasks and server parameters.\n");
-	if(xError == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY)
+	else if(xError == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY)
 		fprintf(file, "Couldn't allocate required memory.\n");
-	if(xError == errNOT_CALLABLE)
-		fprintf(file, "This function should only be called after the scheduler is started. SetServer will handle batch distribution before that point.");
-	if(xError == errINVALIDCOMMAND)
-		fprintf(file, "Your command wasn't recognized.\n");
-	if(xError == errMISSINGPARAM)
-		fprintf(file, "Command is missing additional parameters.\n");
-	if(xError == errBADINPUT)
-		fprintf(file, "Parameters couldn't be read properly.\n");
-	if(xError == errNOTFOUND)
+	else if(xError == errNOTFOUND)
 		fprintf(file, "Couldn't find desired item.\n");
+	else if(xError == errINVALIDCOMMAND)
+		fprintf(file, "Your command wasn't recognized.\n");
+	else if(xError == errMISSINGPARAM)
+		fprintf(file, "Command is missing additional parameters.\n");
+	else if(xError == errBADINPUT)
+		fprintf(file, "Parameters couldn't be read properly.\n");
 	fflush(file);
 }
 
@@ -170,8 +168,6 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 		BaseType_t xCommand = ( BaseType_t ) 0;
 		char pcCommand[COMMAND_SIZE];
 
-		printf("System is listening to commands.\n");
-		fflush(stdout);
 		fscanf(readFile, "%s", pcCommand);
 
 		if(strcmp(pcCommand, "add_task_periodic") == 0)
@@ -189,76 +185,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 		else
 			xError = errINVALIDCOMMAND;
 
-		if(xCommand == commADDPD)
-		{
-			char pcName[configMAX_TASK_NAME_LEN];
-			char pcFuncName[FUNC_NAME_SIZE];
-			char pvParams[configMAX_PARAM_LEN];
-			TickType_t xPeriod;
-			TaskHandle_t xHandle;
-
-			if(fscanf(readFile, "%s %s %s %u", pcName, pcFuncName, pvParams, &xPeriod) != 4)
-			{
-				xError = errMISSINGPARAM;
-			}
-			else if(strlen(pcName) >= configMAX_TASK_NAME_LEN || strlen(pcFuncName) >= FUNC_NAME_SIZE || strlen(pvParams) >= configMAX_PARAM_LEN)
-			{
-				xError = errBADINPUT;
-			}
-			else
-			{
-				void (*pfFunc)(void* pvParams) = pfFunctionForString(pcFuncName);
-				TickType_t xComputationTime = xGetComputationTime(pcFuncName);
-				if (pfFunc == NULL)
-				{
-					xError = errNOTFOUND;
-				}
-				else
-				{
-					xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, &xHandle, 0, xPeriod, xComputationTime);
-					if( xError == pdPASS )
-					{
-						fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
-					}
-				}
-			}
-		}
-		else if(xCommand == commADDAB)
-		{
-			char pcName[configMAX_TASK_NAME_LEN];
-			char pcFuncName[FUNC_NAME_SIZE];
-			char pvParams[configMAX_PARAM_LEN];
-			TickType_t xArrivalTime;
-			TaskHandle_t xHandle;
-
-			if(fscanf(readFile, "%s %s %s %u", pcName, pcFuncName, pvParams, &xArrivalTime) != 4)
-			{
-				xError = errMISSINGPARAM;
-			}
-			else if(strlen(pcName) >= configMAX_TASK_NAME_LEN || strlen(pcFuncName) >= FUNC_NAME_SIZE || strlen(pvParams) >= configMAX_PARAM_LEN)
-			{
-				xError = errBADINPUT;
-			}
-			else
-			{
-				void (*pfFunc)(void* pvParams) = pfFunctionForString(pcFuncName);
-				TickType_t xComputationTime = xGetComputationTime(pcFuncName);
-				if (pfFunc == NULL)
-				{
-					xError = errNOTFOUND;
-				}
-				else
-				{
-					xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, &xHandle, xArrivalTime, 0, xComputationTime);
-					if( xError == pdPASS )
-					{
-						fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
-					}
-				}
-			}
-		}
-		else if(xCommand == commADDAN)
-		{
+		if(xCommand == commADDPD || xCommand == commADDAB || xCommand == commADDAN) {
 			char pcName[configMAX_TASK_NAME_LEN];
 			char pcFuncName[FUNC_NAME_SIZE];
 			char pvParams[configMAX_PARAM_LEN];
@@ -282,10 +209,34 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 				}
 				else
 				{
-					xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, &xHandle, xTaskGetTickCount(), 0, xComputationTime);
-					if( xError == pdPASS )
+					TickType_t xArrivalTime = (TickType_t) 0U;
+					TickType_t xPeriod = (TickType_t) 0U;
+					if(xCommand == commADDAN)
 					{
-						fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
+						xArrivalTime = xTaskGetTickCount();
+					}
+					if(xCommand == commADDPD && fscanf(readFile, "%u", &xPeriod) != 1)
+					{
+						xError = errMISSINGPARAM;
+					}
+					else if(xCommand == commADDAB && fscanf(readFile, "%u", &xArrivalTime) != 1)
+					{
+						xError = errMISSINGPARAM;
+					}
+					else
+					{
+						if(strcmp(pvParams, "NULL") == 0)
+						{
+							xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, NULL, &xHandle, xArrivalTime, xPeriod, xComputationTime);
+						}
+						else
+						{
+							xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, &xHandle, xArrivalTime, xPeriod, xComputationTime);
+						}
+						if( xError == pdPASS )
+						{
+							fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
+						}
 					}
 				}
 			}
@@ -300,7 +251,6 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 			}
 			else
 			{
-				// We'll call a remove task method from task.h here
 				vTaskDelete(xHandle);
 			}
 		}
@@ -335,6 +285,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 			{
 				xError = xTaskSetServer(xCapacity, xPeriod);
 				if(xError == pdPASS) {
+					fprintf(writeFile, "Scheduler started.\n");
 					return;
 				}
 			}
@@ -387,7 +338,7 @@ int main( void )
 
 	/* Production configuration */
 	input_handler(readFile, writeFile);
-	vTaskStartScheduler();
+	vTaskStartScheduler(pxTaskOverTime, pxCapacityOverTime, configGRANULARITY);
 
 	/* Test configuration */
 	/*xTaskCreate(task1, "1", configMINIMAL_STACK_SIZE, NULL, 0, 0, 2, 1);

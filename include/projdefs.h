@@ -55,7 +55,6 @@ definition here is not suitable for your application. */
 #define errSCHEDULER_RUNNING                    ( -3 )
 #define errQUEUE_BLOCKED						( -4 )
 #define errQUEUE_YIELD							( -5 )
-#define errNOT_CALLABLE                         ( -6 )
 
 /* Macros used for basic data corruption checks. */
 #ifndef configUSE_LIST_DATA_INTEGRITY_CHECK_BYTES
