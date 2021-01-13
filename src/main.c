@@ -44,7 +44,7 @@ static void task1(void *pvParams)
 static void vTask1(void *pvParams)
 {
 	TickType_t startTick = xTaskGetTickCount();
-	for(int i = 0; i < 1300000; i++) {
+	for(int i = 0; i < 1025000; i++) {
 		double o = 421634/2341;
 	}
 	TickType_t endTick = xTaskGetTickCount();
@@ -56,7 +56,7 @@ static void vTask1(void *pvParams)
 static void vTask2(void *pvParams)
 {
 	TickType_t startTick = xTaskGetTickCount();
-	for(int i = 0; i < 2600000; i++) {
+	for(int i = 0; i < 2050000; i++) {
 		double o = 421634/2341;
 	}
 	TickType_t endTick = xTaskGetTickCount();
@@ -68,7 +68,7 @@ static void vTask2(void *pvParams)
 static void vTask4(void *pvParams)
 {
 	TickType_t startTick = xTaskGetTickCount();
-	for(int i = 0; i < 5000000; i++) {
+	for(int i = 0; i < 4000000; i++) {
 		double o = 421634/2341;
 	}
 	TickType_t endTick = xTaskGetTickCount();
