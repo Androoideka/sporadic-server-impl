@@ -334,6 +334,7 @@ int main( void )
 	if( xError == pdPASS )
 	{
 		fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
+		fflush(writeFile);
 	}
 
 	/* Production configuration */
