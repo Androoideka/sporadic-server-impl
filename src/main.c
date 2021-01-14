@@ -25,8 +25,6 @@
 #define errBADINPUT         -1001
 #define errNOTFOUND         -1002
 
-// Need tasks with computation times: 1, 4, 2
-
 static void task0(void *pvParams)
 {
 	printf("+");
@@ -77,6 +75,13 @@ static void vTask4(void *pvParams)
 	vTaskDelete(0);
 }
 
+static void vInput(void *pvParams)
+{
+	FILE *readFile = stdin;
+	FILE *writeFile = stderr;
+	input_handler(readFile, writeFile);
+}
+
 static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 {
 	if(strcmp(pcString, "task0") == 0)
@@ -98,6 +103,10 @@ static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 	else if(strcmp(pcString, "vTask4") == 0)
 	{
 		return vTask4;
+	}
+	else if(strcmp(pcString, "vInput") == 0)
+	{
+		return vInput;
 	}
 	else
 	{
@@ -127,65 +136,15 @@ static TickType_t xGetComputationTime(char pcString[])
 	{
 		return 4;
 	}
+	else if(strcmp(pcString, "vInput") == 0)
+	{
+		return 1;
+	}
 	else
 	{
 		return 0;
 	}
 }
-
-/*void task1(void *pvParams)
-{
-	int i;
-	TickType_t xStart = xTaskGetTickCount();
-	for (i=0 ; i < 500; i++)
-	{
-		printf("-");
-		fflush(stdout);
-	}
-	printf("\n%u", xStart - xTaskGetTickCount());
-	fflush(stdout);
-	vTaskDelete(0);
-}
-
-static void (*pfFunctionForString(char pcString[]))(void* pvParams)
-{
-	if(strcmp(pcString, "task1") == 0)
-	{
-		return task1;
-	}
-	else if(strcmp(pcString, "task4") == 0)
-	{
-		return task4;
-	}
-	else if(strcmp(pcString, "task2") == 0)
-	{
-		return task2;
-	}
-	else
-	{
-		return NULL;
-	}
-}
-
-static TickType_t xGetComputationTime(char pcString[])
-{
-	if(strcmp(pcString, "task1") == 0)
-	{
-		return ( TickType_t ) 1U;
-	}
-	else if(strcmp(pcString, "task4") == 0)
-	{
-		return ( TickType_t ) 4U;
-	}
-	else if(strcmp(pcString, "task2") == 0)
-	{
-		return ( TickType_t ) 2U;
-	}
-	else
-	{
-		return NULL;
-	}
-}*/
 
 static void exception_handler(BaseType_t xError, FILE *file)
 {
