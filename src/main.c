@@ -338,14 +338,14 @@ int main( void )
 	FILE *writeFile = stderr;
 
 	/* Stat writing */
-	/*BaseType_t xError = pdPASS;
+	BaseType_t xError = pdPASS;
 	TaskHandle_t xHandle;
 	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY - 1, 1);
 	if( xError == pdPASS )
 	{
-		fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
+		fprintf(writeFile, "Handle: %p\n", ( UBaseType_t ) xHandle);
 		fflush(writeFile);
-	}*/
+	}
 
 	input_handler(readFile, writeFile);
 	vTaskStartScheduler(pxTaskOverTime, pxCapacityOverTime, configGRANULARITY);
