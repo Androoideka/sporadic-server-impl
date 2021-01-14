@@ -145,7 +145,7 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 																										            \
 		pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ uxTopPriority ] ) );			                    \
 		uxTopReadyPriority = uxTopPriority;																            \
-		if( pxTCB->xPeriod < xServerPeriod || uxEmpty != pdFALSE )                                                  \
+		if( pxTCB->xPeriod < xServerPeriod || uxEmpty == pdFALSE )                                                  \
 		{                                                                                                           \
 			if( pxActiveSR == NULL )                                                                                \
 			{                                                                                                       \
@@ -163,7 +163,7 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 		}                                                                                                           \
 		else                                                                                                        \
 		{                                                                                                           \
-			if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                                                    \
+			if( pxActiveSR != NULL && pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                              \
 			{                                                                                                       \
 				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );                                     \
 				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );                             \
@@ -442,7 +442,7 @@ PRIVILEGED_DATA static volatile UBaseType_t uxPendedTicks 			= ( UBaseType_t ) 0
 PRIVILEGED_DATA static volatile BaseType_t xYieldPending 			= pdFALSE;
 PRIVILEGED_DATA static volatile BaseType_t xNumOfOverflows 			= ( BaseType_t ) 0;
 PRIVILEGED_DATA static UBaseType_t uxTaskNumber 					= ( UBaseType_t ) 0U;
-PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime		= ( TickType_t ) 0U; /* Initialised to portMAX_DELAY before the scheduler starts. */
+PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime		= portMAX_DELAY; /* I don't see why they didn't just set portMAX_DELAY here so I did it myself. */
 PRIVILEGED_DATA static TaskHandle_t xIdleTaskHandle					= NULL;			/*< Holds the handle of the idle task.  The idle task is created automatically when the scheduler is started. */
 
 PRIVILEGED_DATA static double ufSchedulability;
@@ -641,9 +641,15 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
 static BaseType_t xPrepareBatch ( void ) PRIVILEGED_FUNCTION;
 
 /*
- * Drop tasks queued in the batch in case it's not schedulable.
+ * Drop all tasks queued in the batch in case the batch is not schedulable.
  */
-static void xDropBatch ( void ) PRIVILEGED_FUNCTION;
+static void prvDropBatch ( void ) PRIVILEGED_FUNCTION;
+
+/*
+ * Place all periodic tasks into their corresponding ready list and
+ * move aperiodic tasks either to the ready list or delayed list.
+ */
+static void prvDistributeBatch ( void ) PRIVILEGED_FUNCTION;
 
 /*
  * freertos_tasks_c_additions_init() should only be called if the user definable
@@ -1223,20 +1229,26 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 			/* Event lists are always in priority order. */
 			listSET_LIST_ITEM_VALUE( &( pxNewTCB->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) pxNewTCB->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
 			listSET_LIST_ITEM_OWNER( &( pxNewTCB->xEventListItem ), pxNewTCB );
-
+		}
+		/* If the scheduler is running and an aperiodic task has arrived, distribute it immediately. */
+		if( xSchedulerRunning != pdFALSE )
+		{
 			/* Minor optimisation.  Doesn't really matter if the tick count changes here. */
 			const TickType_t xConstTickCount = xTickCount;
 			if( pxNewTCB->xArrivalTime == xConstTickCount )
 			{
 				vListInsertEnd( &xAperiodicTasksList, &( ( pxNewTCB )->xStateListItem ) );
-				if( xSchedulerRunning != pdFALSE && pxCurrentTCB->xPeriod > xServerPeriod )
+				if( pxCurrentTCB->xPeriod > xServerPeriod )
 				{
 					taskYIELD_IF_USING_PREEMPTION();
 				}
 			}
 			else
 			{
-				TickType_t xTimeToWake = pxNewTCB->xArrivalTime - xConstTickCount;
+				/* Calculate the time at which the task should be woken if the event
+				does not occur.  This may overflow but this doesn't matter, the
+				kernel will manage it correctly. */
+				TickType_t xTimeToWake = xConstTickCount + pxNewTCB->xArrivalTime;
 
 				/* The list item will be inserted in wake time order. */
 				listSET_LIST_ITEM_VALUE( &( pxNewTCB->xStateListItem ), xTimeToWake );
@@ -1365,16 +1377,74 @@ double ufTaskProcUsage;
 }
 /*-----------------------------------------------------------*/
 
-static void xDropBatch( void )
+static void prvDropBatch( void )
 {
-	UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
-	TCB_t *listPointer;
+UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
+TCB_t *listPointer;
+
 	for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
 	{
 		listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
 		/* Remove task from the batch list. */
 		uxListRemove( &( listPointer->xStateListItem ) );
+		uxCurrentNumberOfTasks--;
+		uxTaskNumber--;
 		prvDeleteTCB( listPointer );
+	}
+}
+/*-----------------------------------------------------------*/
+
+static void prvDistributeBatch( void )
+{
+UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
+TCB_t *listPointer;
+
+	for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
+	{
+		listGET_OWNER_OF_NEXT_ENTRY( listPointer, &xBatchedTasksList );
+		uxListRemove( &( ( listPointer )->xStateListItem ) );
+
+		if( listPointer->xPeriod != ( TickType_t ) 0U )
+		{
+			#if ( configUSE_MUTEXES == 1 )
+			{
+				listPointer->uxBasePriority = listPointer->uxPriority;
+			}
+			#endif
+			/* Event lists are always in priority order. */
+			listSET_LIST_ITEM_VALUE( &( listPointer->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) listPointer->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
+			listSET_LIST_ITEM_OWNER( &( listPointer->xEventListItem ), listPointer );
+
+			prvAddTaskToReadyList( listPointer );
+		}
+		else
+		{
+			if( listPointer->xArrivalTime == xTickCount )
+			{
+				vListInsertEnd( &xAperiodicTasksList, &( ( listPointer )->xStateListItem ) );
+			}
+			else
+			{
+				/* The list item will be inserted in wake time order. */
+				listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xArrivalTime );
+
+				/* The wake time cannot overflow at the start, so the current block list
+				is used. */
+				vListInsert( pxDelayedTaskList, &( listPointer->xStateListItem ) );
+
+				/* If the task entering the blocked state was placed at the
+				head of the list of blocked tasks then xNextTaskUnblockTime
+				needs to be updated too. */
+				if( listPointer->xArrivalTime < xNextTaskUnblockTime )
+				{
+					xNextTaskUnblockTime = listPointer->xArrivalTime;
+				}
+				else
+				{
+					mtCOVERAGE_TEST_MARKER();
+				}
+			}
+		}
 	}
 }
 /*-----------------------------------------------------------*/
@@ -2234,7 +2304,7 @@ BaseType_t xReturn;
 	xReturn = xPrepareBatch();
 	if( xReturn != pdPASS )
 	{
-		xDropBatch();
+		prvDropBatch();
 		return xReturn;
 	}
 
@@ -2307,9 +2377,6 @@ BaseType_t xReturn;
 	}
 	#else
 	{
-		UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
-		TCB_t *listPointer;
-
 		/* The Idle task is being created using dynamically allocated RAM. */
 		xReturn = xTaskCreate(	prvIdleTask,
 								configIDLE_TASK_NAME,
@@ -2320,25 +2387,8 @@ BaseType_t xReturn;
 								portMAX_DELAY, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
 								( TickType_t ) 0);
 
-		for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
-		{
-			listGET_OWNER_OF_NEXT_ENTRY( listPointer,  &xBatchedTasksList );
+		prvDistributeBatch();
 
-			if( listPointer->xPeriod != ( TickType_t ) 0U )
-			{
-				#if ( configUSE_MUTEXES == 1 )
-				{
-					listPointer->uxBasePriority = listPointer->uxPriority;
-				}
-				#endif
-				/* Event lists are always in priority order. */
-				listSET_LIST_ITEM_VALUE( &( listPointer->xEventListItem ), ( TickType_t ) configMAX_PRIORITIES - ( TickType_t ) listPointer->uxPriority ); /*lint !e961 MISRA exception as the casts are only redundant for some ports. */
-				listSET_LIST_ITEM_OWNER( &( listPointer->xEventListItem ), listPointer );
-
-				uxListRemove( &( ( listPointer )->xStateListItem ) );
-				prvAddTaskToReadyList( listPointer );
-			}
-		}
 		/* Select a new task to run using either the generic C or port
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
@@ -2387,7 +2437,6 @@ BaseType_t xReturn;
 		}
 		#endif /* configUSE_NEWLIB_REENTRANT */
 
-		xNextTaskUnblockTime = portMAX_DELAY;
 		xSchedulerRunning = pdTRUE;
 		xTickCount = ( TickType_t ) configINITIAL_TICK_COUNT;
 
@@ -3167,7 +3216,9 @@ BaseType_t xSwitchRequired = pdFALSE;
 						only be performed if the unblocked task has a
 						priority that is higher than the
 						currently executing task. */
-						if( ( pxTCB->xPeriod == ( TickType_t ) 0U && xServerPeriod < pxCurrentTCB->xPeriod ) || pxTCB->xPeriod < pxCurrentTCB->xPeriod )
+						TickType_t xPeriod = pxTCB->xPeriod ? pxTCB->xPeriod : xServerPeriod;
+						TickType_t xCurrentPeriod = pxCurrentTCB->xPeriod ? pxCurrentTCB->xPeriod : xServerPeriod;
+						if( xPeriod < xCurrentPeriod && ( pxTCB->xPeriod != ( TickType_t ) 0U || xServerCapacity > ( TickType_t ) 0U ) )
 						{
 							xSwitchRequired = pdTRUE;
 						}

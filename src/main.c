@@ -44,11 +44,11 @@ static void task1(void *pvParams)
 static void vTask1(void *pvParams)
 {
 	TickType_t startTick = xTaskGetTickCount();
-	for(int i = 0; i < 1025000; i++) {
+	for(int i = 0; i < 500000; i++) {
 		double o = 421634/2341;
 	}
 	TickType_t endTick = xTaskGetTickCount();
-	printf("%d\n", endTick - startTick);
+	printf("Task 1 - %d\n", endTick - startTick);
 	fflush(stdout);
 	vTaskDelete(0);
 }
@@ -56,11 +56,11 @@ static void vTask1(void *pvParams)
 static void vTask2(void *pvParams)
 {
 	TickType_t startTick = xTaskGetTickCount();
-	for(int i = 0; i < 2050000; i++) {
+	for(int i = 0; i < 2000000; i++) {
 		double o = 421634/2341;
 	}
 	TickType_t endTick = xTaskGetTickCount();
-	printf("%d\n", endTick - startTick);
+	printf("Task 2 - %d\n", endTick - startTick);
 	fflush(stdout);
 	vTaskDelete(0);
 }
@@ -68,11 +68,11 @@ static void vTask2(void *pvParams)
 static void vTask4(void *pvParams)
 {
 	TickType_t startTick = xTaskGetTickCount();
-	for(int i = 0; i < 4000000; i++) {
+	for(int i = 0; i < 3100000; i++) {
 		double o = 421634/2341;
 	}
 	TickType_t endTick = xTaskGetTickCount();
-	printf("%d\n", endTick - startTick);
+	printf("Task 4 - %d\n", endTick - startTick);
 	fflush(stdout);
 	vTaskDelete(0);
 }
