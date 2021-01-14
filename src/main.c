@@ -296,6 +296,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 				xError = xTaskSetServer(xCapacity, xPeriod);
 				if(xError == pdPASS) {
 					fprintf(writeFile, "Scheduler started.\n");
+					fflush(writeFile);
 					return;
 				}
 			}
