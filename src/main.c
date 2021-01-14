@@ -343,7 +343,7 @@ int main( void )
 	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY - 1, 1);
 	if( xError == pdPASS )
 	{
-		fprintf(writeFile, "Handle: %p\n", ( UBaseType_t ) xHandle);
+		fprintf(writeFile, "Handle: %p\n", xHandle);
 		fflush(writeFile);
 	}
 
