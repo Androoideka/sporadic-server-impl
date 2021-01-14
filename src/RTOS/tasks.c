@@ -830,7 +830,7 @@ static void prvDistributeBatch ( void ) PRIVILEGED_FUNCTION;
 	TCB_t *pxNewTCB;
 	BaseType_t xReturn;
 
-		if(xPeriod > ( TickType_t ) 0U && xSchedulerRunning != pdFALSE)
+		if( xPeriod > ( TickType_t ) 0U && xSchedulerRunning != pdFALSE )
 		{
 			return errSCHEDULER_RUNNING;
 		}
@@ -1454,6 +1454,10 @@ TCB_t *listPointer;
 	void vTaskDelete( TaskHandle_t xTaskToDelete )
 	{
 	TCB_t *pxTCB;
+		if( xSchedulerRunning == pdFALSE )
+		{
+			return;
+		}
 
 		taskENTER_CRITICAL();
 		{

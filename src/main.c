@@ -245,7 +245,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 						}
 						if( xError == pdPASS )
 						{
-							fprintf(writeFile, "%p\n", xHandle);
+							fprintf(writeFile, "Handle: %p\n", xHandle);
 						}
 					}
 				}
