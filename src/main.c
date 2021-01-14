@@ -8,7 +8,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#define configGRANULARITY   1000
+#define configGRANULARITY   200
 
 #define commADDPD     ( BaseType_t ) 1
 #define commADDAB     ( BaseType_t ) 2 // command add aperiodic batched
@@ -305,8 +305,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 	}
 }
 
-static TaskHandle_t pxTaskOverTime[configGRANULARITY];
-static TickType_t pxCapacityOverTime[configGRANULARITY];
+static TickStats_t pxTickStats[configGRANULARITY];
 
 static void vWriteStatsTask(void *pvParams)
 {
@@ -324,7 +323,7 @@ static void vWriteStatsTask(void *pvParams)
 	{
 		for( UBaseType_t i = ( UBaseType_t ) 0U; i < configGRANULARITY; i++ )
 		{
-			fprintf(statFile, "%lu %u\n", ( UBaseType_t ) pxTaskOverTime[ i ], pxCapacityOverTime[ i ] );
+			fprintf(statFile, "%u %p %u\n", pxTickStats[i].xTick, pxTickStats[i].xHandle, pxTickStats[i].xCapacity);
 		}
 	}
 	taskEXIT_CRITICAL();
@@ -341,7 +340,7 @@ int main( void )
 	/* Stat writing */
 	BaseType_t xError = pdPASS;
 	TaskHandle_t xHandle;
-	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY - 1, 1);
+	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY / 2, 1);
 	if( xError == pdPASS )
 	{
 		fprintf(writeFile, "Handle: %p\n", xHandle);
@@ -349,7 +348,7 @@ int main( void )
 	}
 
 	input_handler(readFile, writeFile);
-	vTaskStartScheduler(pxTaskOverTime, pxCapacityOverTime, configGRANULARITY);
+	vTaskStartScheduler(pxTickStats, configGRANULARITY);
 
 	return 0;
 

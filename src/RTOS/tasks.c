@@ -406,13 +406,12 @@ PRIVILEGED_DATA static TickType_t xServerPeriod = ( TickType_t ) 0U;
 time slicing. This is no longer needed as time slicing is off. */
 PRIVILEGED_DATA static UBaseType_t uxServerPriority = tskIDLE_PRIORITY;
 
-/* These are the pointers for runtime data. */
-PRIVILEGED_DATA static TaskHandle_t * pxTaskArray;
-PRIVILEGED_DATA static TickType_t * pxCapacityArray;
+/* This is the pointer for runtime data. */
+PRIVILEGED_DATA static TickStats_t * pxTickStats;
 /* Information stays written until this amount of ticks. Use a similar interval as your runtime read/write task. */
-PRIVILEGED_DATA static UBaseType_t uxArraySize;
+PRIVILEGED_DATA static UBaseType_t uxStatSize;
 /* Array counter. */
-PRIVILEGED_DATA static UBaseType_t uxCounter = ( UBaseType_t ) 0U;
+PRIVILEGED_DATA static UBaseType_t uxStatCounter = ( UBaseType_t ) 0U;
 
 #if( INCLUDE_vTaskDelete == 1 )
 
@@ -2344,13 +2343,12 @@ BaseType_t xReturn;
 }
 /*-----------------------------------------------------------*/
 
-void vTaskStartScheduler( TaskHandle_t * pxTaskOverTime, TickType_t * pxCapacityOverTime, UBaseType_t uxGranularity )
+void vTaskStartScheduler( TickStats_t * pxStatsArray, UBaseType_t uxGranularity )
 {
 BaseType_t xReturn;
 
-	pxTaskArray = pxTaskOverTime;
-	pxCapacityArray = pxCapacityOverTime;
-	uxArraySize = uxGranularity;
+	pxTickStats = pxStatsArray;
+	uxStatSize = uxGranularity;
 
 	/* Add the idle task at the lowest priority. */
 	#if( configSUPPORT_STATIC_ALLOCATION == 1 )
@@ -2397,8 +2395,9 @@ BaseType_t xReturn;
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
 
-		pxTaskArray[ uxCounter ] = ( TaskHandle_t ) pxCurrentTCB;
-		pxCapacityArray[ uxCounter ] = xServerCapacity;
+		pxTickStats[ uxStatCounter ].xTick = xTickCount;
+		pxTickStats[ uxStatCounter ].xHandle = ( TaskHandle_t ) pxCurrentTCB;
+		pxTickStats[ uxStatCounter ].xCapacity = xServerCapacity;
 	}
 	#endif /* configSUPPORT_STATIC_ALLOCATION */
 
@@ -3104,12 +3103,13 @@ BaseType_t xSwitchRequired = pdFALSE;
 			}
 		}
 
-		if( ++uxCounter >= uxArraySize )
+		if( ++uxStatCounter >= uxStatSize )
 		{
-			uxCounter = ( UBaseType_t ) 0U;
+			uxStatCounter = ( UBaseType_t ) 0U;
 		}
-		pxTaskArray[ uxCounter ] = ( TaskHandle_t ) pxCurrentTCB;
-		pxCapacityArray[ uxCounter ] = xServerCapacity;
+		pxTickStats[ uxStatCounter ].xTick = xConstTickCount;
+		pxTickStats[ uxStatCounter ].xHandle = ( TaskHandle_t ) pxCurrentTCB;
+		pxTickStats[ uxStatCounter ].xCapacity = xServerCapacity;
 
 		/* If an aperiodic task is currently using the server,
 		queue more capacity to be refilled. */

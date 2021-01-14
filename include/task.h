@@ -147,6 +147,13 @@ typedef struct xTASK_STATUS
 	configSTACK_DEPTH_TYPE usStackHighWaterMark;	/* The minimum amount of stack space that has remained for the task since the task was created.  The closer this value is to zero the closer the task has come to overflowing its stack. */
 } TaskStatus_t;
 
+typedef struct xTICK_STATS
+{
+	TickType_t xTick; /* The tick to which the rest of the information in the structure relates. */
+	TaskHandle_t xHandle; /* The handle of the task running during this tick. */
+	TickType_t xCapacity; /* The capacity of the server during this tick. */
+} TickStats_t;
+
 /* Possible return values for eTaskConfirmSleepModeStatus(). */
 typedef enum
 {
@@ -1228,7 +1235,7 @@ BaseType_t xTaskResumeFromISR( TaskHandle_t xTaskToResume ) PRIVILEGED_FUNCTION;
  * \defgroup vTaskStartScheduler vTaskStartScheduler
  * \ingroup SchedulerControl
  */
-void vTaskStartScheduler( TaskHandle_t * pxTaskOverTime, TickType_t * pxCapacityOverTime, UBaseType_t uxGranularity ) PRIVILEGED_FUNCTION;
+void vTaskStartScheduler( TickStats_t * pxStatsArray, UBaseType_t uxGranularity ) PRIVILEGED_FUNCTION;
 
 /**
  * task. h
