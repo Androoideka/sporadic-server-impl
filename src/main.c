@@ -25,6 +25,8 @@
 #define errBADINPUT         -1001
 #define errNOTFOUND         -1002
 
+static void input_handler();
+
 static void task0(void *pvParams)
 {
 	printf("+");
@@ -243,7 +245,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 						}
 						if( xError == pdPASS )
 						{
-							fprintf(writeFile, "%lu\n", ( UBaseType_t ) xHandle);
+							fprintf(writeFile, "%p\n", xHandle);
 						}
 					}
 				}
@@ -253,7 +255,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 		{
 			TaskHandle_t xHandle;
 
-			if(fscanf(readFile, "%lu", &xHandle) != 1)
+			if(fscanf(readFile, "%p", &xHandle) != 1)
 			{
 				xError = errMISSINGPARAM;
 			}
