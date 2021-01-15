@@ -443,6 +443,7 @@ PRIVILEGED_DATA static volatile BaseType_t xNumOfOverflows 			= ( BaseType_t ) 0
 PRIVILEGED_DATA static UBaseType_t uxTaskNumber 					= ( UBaseType_t ) 0U;
 PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime		= portMAX_DELAY; /* I don't see why they didn't just set portMAX_DELAY here so I did it myself. */
 PRIVILEGED_DATA static TaskHandle_t xIdleTaskHandle					= NULL;			/*< Holds the handle of the idle task.  The idle task is created automatically when the scheduler is started. */
+PRIVILEGED_DATA static BaseType_t xInitialOverflow                  = pdTRUE; /* In this Windows port, starting the scheduler takes a long time so IncrementTick is called before any task even starts execution. This is a workaround so we can start the ticks from -1 without it registering as an overflow at the start. */
 
 PRIVILEGED_DATA static double ufSchedulability;
 
@@ -1476,7 +1477,8 @@ TCB_t *listPointer;
 				pxTCB->xStackInitRequired++;
 				pxTCB->xArrivalTime = pxTCB->xArrivalTime + pxTCB->xPeriod;
 				prvAddCurrentTaskToDelayedList( pxTCB->xArrivalTime - xTickCount, pdFALSE );
-				//portPRE_TASK_DELETE_HOOK( pxTCB, &xYieldPending );
+				uxTaskNumber++;
+				portPRE_TASK_DELETE_HOOK( pxTCB, &xYieldPending );
 			}
 			else
 			{
@@ -2442,7 +2444,8 @@ void vTaskStartScheduler( TickStats_t * pxStatsArray, UBaseType_t uxGranularity 
 	#endif /* configUSE_NEWLIB_REENTRANT */
 
 	xSchedulerRunning = pdTRUE;
-	xTickCount = ( TickType_t ) configINITIAL_TICK_COUNT;
+	xTickCount = ( TickType_t ) configINITIAL_TICK_COUNT - ( TickType_t ) 1U;
+	xInitialOverflow = ( BaseType_t ) pdTRUE;
 
 	/* If configGENERATE_RUN_TIME_STATS is defined then the following
 	macro must be defined to configure the timer/counter used to generate
@@ -3069,13 +3072,18 @@ BaseType_t xSwitchRequired = pdFALSE;
 		delayed lists if it wraps to 0. */
 		xTickCount = xConstTickCount;
 
-		if( xConstTickCount == ( TickType_t ) 0U ) /*lint !e774 'if' does not always evaluate to false as it is looking for an overflow. */
+		if( xConstTickCount == ( TickType_t ) 0U && xInitialOverflow == pdFALSE ) /*lint !e774 'if' does not always evaluate to false as it is looking for an overflow. */
 		{
 			taskSWITCH_DELAYED_LISTS();
 		}
 		else
 		{
 			mtCOVERAGE_TEST_MARKER();
+		}
+
+		if( xInitialOverflow == pdTRUE )
+		{
+			xInitialOverflow = pdFALSE;
 		}
 
 		/* Check if a refill is on the menu. */

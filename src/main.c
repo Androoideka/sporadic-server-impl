@@ -56,11 +56,23 @@ static void vTask1(void *pvParams)
 static void vTask2(void *pvParams)
 {
 	TickType_t startTick = xTaskGetTickCount();
-	for(int i = 0; i < 2000000; i++) {
+	for(int i = 0; i < 1300000; i++) {
 		double o = 421634/2341;
 	}
 	TickType_t endTick = xTaskGetTickCount();
 	printf("Task 2 - %d\n", endTick - startTick);
+	fflush(stdout);
+	vTaskDelete(0);
+}
+
+static void vTask3(void *pvParams)
+{
+	TickType_t startTick = xTaskGetTickCount();
+	for(int i = 0; i < 2000000; i++) {
+		double o = 421634/2341;
+	}
+	TickType_t endTick = xTaskGetTickCount();
+	printf("Task 3 - %d\n", endTick - startTick);
 	fflush(stdout);
 	vTaskDelete(0);
 }
@@ -102,6 +114,10 @@ static void (*pfFunctionForString(char pcString[]))(void* pvParams)
 	{
 		return vTask2;
 	}
+	else if(strcmp(pcString, "vTask3") == 0)
+	{
+		return vTask3;
+	}
 	else if(strcmp(pcString, "vTask4") == 0)
 	{
 		return vTask4;
@@ -133,6 +149,10 @@ static TickType_t xGetComputationTime(char pcString[])
 	else if(strcmp(pcString, "vTask2") == 0)
 	{
 		return 2;
+	}
+	else if(strcmp(pcString, "vTask3") == 0)
+	{
+		return 3;
 	}
 	else if(strcmp(pcString, "vTask4") == 0)
 	{
@@ -338,14 +358,14 @@ int main( void )
 	FILE *writeFile = stderr;
 
 	/* Stat writing */
-	/*BaseType_t xError = pdPASS;
+	BaseType_t xError = pdPASS;
 	TaskHandle_t xHandle;
 	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY / 2, 1);
 	if( xError == pdPASS )
 	{
 		fprintf(writeFile, "Handle: %p\n", xHandle);
 		fflush(writeFile);
-	}*/
+	}
 
 	input_handler(readFile, writeFile);
 	vTaskStartScheduler(pxTickStats, configGRANULARITY);
