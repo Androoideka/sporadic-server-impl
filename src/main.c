@@ -281,7 +281,10 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 			}
 			else
 			{
-				vTaskDelete(xHandle);
+				if(xHandle != 0)
+				{
+					vTaskDelete(xHandle);
+				}
 			}
 		}
 		else if(xCommand == commSCHCK)
