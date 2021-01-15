@@ -130,47 +130,47 @@ configIDLE_TASK_NAME in FreeRTOSConfig.h. */
 
 	/*-----------------------------------------------------------*/
 
-	#define taskSELECT_HIGHEST_PRIORITY_TASK()													                    \
-	{																									            \
-	TCB_t * pxTCB;                                                                                                  \
-	UBaseType_t uxEmpty = listLIST_IS_EMPTY( &xAperiodicTasksList );                                                \
-	UBaseType_t uxTopPriority = uxTopReadyPriority;														            \
-																										            \
-		/* Find the highest priority queue that contains ready tasks. */								            \
-		while( listLIST_IS_EMPTY( &( pxReadyTasksLists[ uxTopPriority ] ) ) )							            \
-		{																								            \
-			configASSERT( uxTopPriority );																            \
-			--uxTopPriority;																			            \
-		}																								            \
-																										            \
-		pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ uxTopPriority ] ) );			                    \
-		uxTopReadyPriority = uxTopPriority;																            \
-		if( pxTCB->xPeriod < xServerPeriod || uxEmpty == pdFALSE )                                                  \
-		{                                                                                                           \
-			if( pxActiveSR == NULL )                                                                                \
-			{                                                                                                       \
-				pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );                                     \
-				if( xServerCapacity > ( TickType_t ) 0U )                                                           \
-				{                                                                                                   \
-					listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xTickCount + xServerPeriod );   \
-				}                                                                                                   \
-				pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;                                                     \
-			}                                                                                                       \
-			if( xServerCapacity > ( TickType_t ) 0U && pxTCB->xPeriod > xServerPeriod && uxEmpty == pdFALSE )       \
-			{                                                                                                       \
-				pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );                                        \
-			}                                                                                                       \
-		}                                                                                                           \
-		else                                                                                                        \
-		{                                                                                                           \
-			if( pxActiveSR != NULL && pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )                              \
-			{                                                                                                       \
-				( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );                                     \
-				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );                             \
-			}                                                                                                       \
-			pxActiveSR = NULL;                                                                                      \
-		}                                                                                                           \
-		pxCurrentTCB = pxTCB;                                                                                       \
+	#define taskSELECT_HIGHEST_PRIORITY_TASK()													                          \
+	{																									                  \
+	TCB_t * pxTCB;                                                                                                        \
+	UBaseType_t uxEmpty = listLIST_IS_EMPTY( &xAperiodicTasksList );                                                      \
+	UBaseType_t uxTopPriority = uxTopReadyPriority;														                  \
+																										                  \
+		/* Find the highest priority queue that contains ready tasks. */								                  \
+		while( listLIST_IS_EMPTY( &( pxReadyTasksLists[ uxTopPriority ] ) ) )							                  \
+		{																								                  \
+			configASSERT( uxTopPriority );																                  \
+			--uxTopPriority;																			                  \
+		}																								                  \
+																										                  \
+		pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &( pxReadyTasksLists[ uxTopPriority ] ) );			                          \
+		uxTopReadyPriority = uxTopPriority;																                  \
+		if( pxTCB->xPeriod <= xServerPeriod || ( xServerCapacity > ( TickType_t ) 0U && uxEmpty == pdFALSE ) )            \
+		{                                                                                                                 \
+			if( pxActiveSR == NULL )                                                                                      \
+			{                                                                                                             \
+				pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );                                           \
+				if( xServerCapacity > ( TickType_t ) 0U )                                                                 \
+				{                                                                                                         \
+					listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReplenishmentTimeListItem ), xTickCount + xServerPeriod );   \
+				}                                                                                                         \
+				pxActiveSR->xReplenishmentAmount = ( TickType_t ) 0U;                                                     \
+			}                                                                                                             \
+			if( pxTCB->xPeriod > xServerPeriod )                                                                          \
+			{                                                                                                             \
+				pxTCB = listGET_OWNER_OF_HEAD_ENTRY( &xAperiodicTasksList );                                              \
+			}                                                                                                             \
+		}                                                                                                                 \
+		else                                                                                                              \
+		{                                                                                                                 \
+			if( pxActiveSR != NULL && pxActiveSR->xReplenishmentAmount > ( TickType_t ) 0U )                              \
+			{                                                                                                             \
+				( void ) uxListRemove( &( pxActiveSR->xReplenishmentTimeListItem ) );                                     \
+				vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReplenishmentTimeListItem ) );                             \
+			}                                                                                                             \
+			pxActiveSR = NULL;                                                                                            \
+		}                                                                                                                 \
+		pxCurrentTCB = pxTCB;                                                                                             \
 	} /* taskSELECT_HIGHEST_PRIORITY_TASK */
 
 	/*-----------------------------------------------------------*/
@@ -384,8 +384,8 @@ PRIVILEGED_DATA static List_t xBatchedTasksList;                        /*< List
 
 typedef struct srvServerRefill
 {
-	ListItem_t xReleaseTimeListItem; // RT
-	TickType_t xReleaseAmount; // RA
+	ListItem_t xReplenishmentTimeListItem; // RT
+	TickType_t xReplenishmentAmount; // RA
 } SR_t;
 
 /* If only I could've used a queue. */
@@ -1329,6 +1329,10 @@ double ufTaskProcUsage;
 				}
 				listPointer->uxPriority = uxTopPriority;
 				xMin = listPointer->xPeriod;
+				if( xMax == ( TickType_t ) 0U )
+				{
+					xMax = listPointer->xPeriod;
+				}
 			}
 			else if( listPointer->xPeriod >= xMax )
 			{
@@ -1359,14 +1363,15 @@ double ufTaskProcUsage;
 			}
 			else
 			{
+				listPointer->uxPriority = ( UBaseType_t ) 1U;
 				UBaseType_t j;
 				for( j = ( UBaseType_t ) 2U; j < uxTopPriority; j++ )
 				{
-					listPointer->uxPriority = j - ( UBaseType_t ) 1U;
-					if( listPointer->xPeriod > pxMins[ j ] )
+					if( xMin < pxMins[ j ] || listPointer->xPeriod > pxMins[ j ] )
 					{
 						break;
 					}
+					listPointer->uxPriority = j;
 				}
 			}
 		}
@@ -2330,13 +2335,13 @@ BaseType_t xReturn;
 		{
 			return errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY;
 		}
-		vListInitialiseItem( &( pxActiveSR->xReleaseTimeListItem ) );
+		vListInitialiseItem( &( pxActiveSR->xReplenishmentTimeListItem ) );
 
 		/* Set the pxActiveSR as a link back from the ListItem_t.  This is so we can get
 		back to	the containing Refill from a generic item in a list. */
-		listSET_LIST_ITEM_OWNER( &( pxActiveSR->xReleaseTimeListItem ), pxActiveSR );
+		listSET_LIST_ITEM_OWNER( &( pxActiveSR->xReplenishmentTimeListItem ), pxActiveSR );
 
-		vListInsertEnd( &xAvailableRefills, &( ( pxActiveSR )->xReleaseTimeListItem ) );
+		vListInsertEnd( &xAvailableRefills, &( ( pxActiveSR )->xReplenishmentTimeListItem ) );
 	}
 
 	/* The Idle task is being created using dynamically allocated RAM. */
@@ -3077,17 +3082,17 @@ BaseType_t xSwitchRequired = pdFALSE;
 		if( listLIST_IS_EMPTY( &xRefillQueue ) == pdFALSE )
 		{
 			pxSR = listGET_OWNER_OF_HEAD_ENTRY( &xRefillQueue );
-			xItemValue = listGET_LIST_ITEM_VALUE( &( pxSR->xReleaseTimeListItem ) );
+			xItemValue = listGET_LIST_ITEM_VALUE( &( pxSR->xReplenishmentTimeListItem ) );
 			if ( xConstTickCount == xItemValue )
 			{
-				( void ) uxListRemove( &( pxSR->xReleaseTimeListItem ) );
-				vListInsertEnd( &xAvailableRefills, &( pxSR->xReleaseTimeListItem ) );
+				( void ) uxListRemove( &( pxSR->xReplenishmentTimeListItem ) );
+				vListInsertEnd( &xAvailableRefills, &( pxSR->xReplenishmentTimeListItem ) );
 				/* RT is set when the server is active and the capacity is higher than 0. */
 				if( xServerCapacity == (TickType_t) 0U && pxActiveSR != NULL )
 				{
-					listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReleaseTimeListItem ), xConstTickCount + xServerPeriod );
+					listSET_LIST_ITEM_VALUE( &( pxActiveSR->xReplenishmentTimeListItem ), xConstTickCount + xServerPeriod );
 				}
-				xServerCapacity += pxSR->xReleaseAmount;
+				xServerCapacity += pxSR->xReplenishmentAmount;
 			}
 		}
 
@@ -3103,18 +3108,15 @@ BaseType_t xSwitchRequired = pdFALSE;
 		queue more capacity to be refilled. */
 		if( pxActiveSR != NULL && pxCurrentTCB->xPeriod == ( TickType_t ) 0U )
 		{
-			pxActiveSR->xReleaseAmount++;
+			pxActiveSR->xReplenishmentAmount++;
 			xServerCapacity--;
 			if( xServerCapacity == ( TickType_t ) 0U )
 			{
 				/* RA is calculated when the server is inactive or the capacity is 0. */
-				if( pxActiveSR->xReleaseAmount > ( TickType_t ) 0U )
+				if( pxActiveSR->xReplenishmentAmount > ( TickType_t ) 0U )
 				{
-					( void ) uxListRemove( &( pxActiveSR->xReleaseTimeListItem ) );
-					vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReleaseTimeListItem ) );
-					/* The server might still be active, in which case we need to have a SR ready. */
-					pxActiveSR = listGET_OWNER_OF_HEAD_ENTRY( &xAvailableRefills );
-					pxActiveSR->xReleaseAmount = ( TickType_t ) 0U;
+					( void ) uxListRemove( &( pxActiveSR->xReplenishmentTimeListItem ) );
+					vListInsertEnd( &xRefillQueue, &( pxActiveSR->xReplenishmentTimeListItem ) );
 				}
 				/* If the capacity is 0, we can't serve the aperiodic task anymore. */
 				xSwitchRequired = pdTRUE;
