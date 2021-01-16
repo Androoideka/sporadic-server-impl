@@ -346,6 +346,10 @@ static void vWriteStatsTask(void *pvParams)
 	{
 		for( UBaseType_t i = ( UBaseType_t ) 0U; i < configGRANULARITY; i++ )
 		{
+			if(pxTickStats[i].xHandle == NULL)
+			{
+				break;
+			}
 			fprintf(statFile, "%u %p %u\n", pxTickStats[i].xTick, pxTickStats[i].xHandle, pxTickStats[i].xCapacity);
 		}
 	}
