@@ -3130,6 +3130,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 		pxTickStats[ uxStatCounter ].xTick = xConstTickCount;
 		pxTickStats[ uxStatCounter ].xHandle = ( TaskHandle_t ) pxCurrentTCB;
 		pxTickStats[ uxStatCounter ].xCapacity = xServerCapacity;
+		pxTickStats[ uxStatCounter ].xMarker = pdFALSE;
 
 		/* If an aperiodic task is currently using the server,
 		queue more capacity to be refilled. */
@@ -3223,6 +3224,7 @@ BaseType_t xSwitchRequired = pdFALSE;
 					}
 					else
 					{
+						pxTickStats[ uxStatCounter ].xMarker = pdTRUE;
 						listSET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ), pxTCB->xPeriod );
 						/* Place the unblocked task into the appropriate ready
 						list. */

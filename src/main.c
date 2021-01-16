@@ -350,7 +350,7 @@ static void vWriteStatsTask(void *pvParams)
 			{
 				break;
 			}
-			fprintf(statFile, "%u %p %u\n", pxTickStats[i].xTick, pxTickStats[i].xHandle, pxTickStats[i].xCapacity);
+			fprintf(statFile, "%u %p %u %u\n", pxTickStats[i].xTick, pxTickStats[i].xHandle, pxTickStats[i].xCapacity, pxTickStats[i].xMarker);
 		}
 	}
 	taskEXIT_CRITICAL();

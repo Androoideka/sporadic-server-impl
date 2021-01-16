@@ -152,6 +152,7 @@ typedef struct xTICK_STATS
 	TickType_t xTick; /* The tick to which the rest of the information in the structure relates. */
 	TaskHandle_t xHandle; /* The handle of the task running during this tick. */
 	TickType_t xCapacity; /* The capacity of the server during this tick. */
+	BaseType_t xMarker; /* A number that specifies whether a periodic task's period ends here. */
 } TickStats_t;
 
 /* Possible return values for eTaskConfirmSleepModeStatus(). */
