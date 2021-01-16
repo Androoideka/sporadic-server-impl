@@ -2337,7 +2337,7 @@ BaseType_t xReturn;
 		return xReturn;
 	}
 
-	double serverUsage = xCapacity / xPeriod;
+	double serverUsage = ( double ) xCapacity / ( double ) xPeriod;
 	if( ufSchedulability > ( 2 / ( serverUsage + 1 ) ) )
 	{
 		return errSERVER_NOT_FEASIBLE;
