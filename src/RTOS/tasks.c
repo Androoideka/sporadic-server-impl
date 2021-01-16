@@ -1300,9 +1300,15 @@ double ufTaskProcUsage;
 
 	ufSchedulability = 1;
 
-	if(uxBatchSize < ( UBaseType_t ) 1U)
+	if( uxBatchSize < ( UBaseType_t ) 1U )
 	{
 		return errQUEUE_EMPTY;
+	}
+
+	/* In case there are garbage values in the array. */
+	for( i = ( UBaseType_t ) 1U; i < uxTopPriority; i++ )
+	{
+		pxMins[ i ] = portMAX_DELAY;
 	}
 
 	for( i = ( UBaseType_t ) 0U; i < uxBatchSize; i++ )
@@ -1314,9 +1320,9 @@ double ufTaskProcUsage;
 		}
 		else
 		{
-			ufTaskProcUsage = listPointer->xComputationTime / listPointer->xPeriod;
+			ufTaskProcUsage = ( double ) listPointer->xComputationTime / ( double ) listPointer->xPeriod;
 			ufTaskProcUsage++;
-			if(ufSchedulability * ufTaskProcUsage > 2) {
+			if( ufSchedulability * ufTaskProcUsage > 2 ) {
 				return errSCHEDULE_NOT_FEASIBLE;
 			}
 			ufSchedulability *= ufTaskProcUsage;
@@ -1324,13 +1330,19 @@ double ufTaskProcUsage;
 			listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xPeriod );
 			if( listPointer->xPeriod <= xMin )
 			{
-				if( uxTopPriority < configMAX_PRIORITIES && listPointer->xPeriod < xMin)
+				/* If the minimum is lower than any period added before, then we can put it on a
+				higher priority list if one is available. */
+				if( listPointer->xPeriod < xMin )
 				{
-					++uxTopPriority;
+					if( uxTopPriority < configMAX_PRIORITIES )
+					{
+						++uxTopPriority;
+					}
+					pxMins[ uxTopPriority ] = listPointer->xPeriod;
+					xMin = listPointer->xPeriod;
 				}
 				listPointer->uxPriority = uxTopPriority;
-				xMin = listPointer->xPeriod;
-				if( xMax == ( TickType_t ) 0U )
+				if( xMax < xMin )
 				{
 					xMax = listPointer->xPeriod;
 				}
@@ -1343,13 +1355,13 @@ double ufTaskProcUsage;
 					TCB_t *updateListPointer = listGET_OWNER_OF_HEAD_ENTRY( &xBatchedTasksList );
 					for( j = ( UBaseType_t ) 1U; j < uxTopPriority; j++ )
 					{
-						pxMins[j] = portMAX_DELAY;
+						pxMins[ j ] = portMAX_DELAY;
 					}
 					for( j = ( UBaseType_t ) 0U; j < i; j++ )
 					{
 						if( updateListPointer->uxPriority < configMAX_PRIORITIES )
 						{
-							updateListPointer->uxPriority = updateListPointer->uxPriority + ( UBaseType_t ) 1U;
+							( updateListPointer->uxPriority )++;
 						}
 						if( updateListPointer->xPeriod < pxMins[ updateListPointer->uxPriority ] )
 						{
@@ -1358,21 +1370,28 @@ double ufTaskProcUsage;
 						ListItem_t *pxNext = listGET_NEXT( &( updateListPointer->xStateListItem ) );
 						updateListPointer = listGET_LIST_ITEM_OWNER( pxNext );
 					}
+					xMax = listPointer->xPeriod;
 				}
 				listPointer->uxPriority = ( UBaseType_t ) 1U;
-				xMax = listPointer->xPeriod;
 			}
 			else
 			{
-				listPointer->uxPriority = ( UBaseType_t ) 1U;
 				UBaseType_t j;
-				for( j = ( UBaseType_t ) 2U; j < uxTopPriority; j++ )
+				/* Check if the task is good enough for the current priority by comparing it
+				to the current priority list's minimum period. */
+				for( j = uxTopPriority; j > ( UBaseType_t ) 0U; j-- )
 				{
-					if( xMin < pxMins[ j ] || listPointer->xPeriod > pxMins[ j ] )
+					listPointer->uxPriority = j;
+					if( listPointer->xPeriod <= pxMins[ j ] )
 					{
+						/* If the period of the current task is strictly lower, then it has
+						become the new minimum. */
+						if( listPointer->xPeriod < pxMins[ j ] )
+						{
+							pxMins[ j ] = listPointer->xPeriod;
+						}
 						break;
 					}
-					listPointer->uxPriority = j;
 				}
 			}
 		}
