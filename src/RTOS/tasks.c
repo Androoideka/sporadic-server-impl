@@ -3831,16 +3831,13 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 	{
 		TCB_t *pxTCB;
 
-		taskENTER_CRITICAL();
 		listGET_OWNER_OF_NEXT_ENTRY( pxTCB, pxDelayedTaskList );
+
+		if ( pxTCB != NULL && pxTCB->xStackInitRequired && pxTCB->xArrivalTime > ( xTickCount + ( TickType_t ) 2U ) )
 		{
-			if ( pxTCB->xStackInitRequired )
-			{
-				pxTCB->xStackInitRequired--;
-				pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxOriginalTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
-			}
+			pxTCB->xStackInitRequired--;
+			pxTCB->pxTopOfStack = pxPortInitialiseStack( pxTCB->pxOriginalTopOfStack, pxTCB->pxTaskCode, pxTCB->pvParameters );
 		}
-		taskEXIT_CRITICAL();
 
 		/* See if any tasks have deleted themselves - if so then the idle task
 		is responsible for freeing the deleted task's TCB and stack. */
