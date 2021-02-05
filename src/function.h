@@ -17,6 +17,8 @@ typedef struct xTaskCode
 	TickType_t xComputationTime;
 } TaskCode_t;
 
+void vRecalculateWCET();
+
 TaskCode_t *pxGetTaskCodes(TaskCode_t xInput, BaseType_t *pxCount);
 
 #endif /* FUNCTION_H_ */

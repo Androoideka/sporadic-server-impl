@@ -88,7 +88,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 
 		if(strcmp(pcCommand, "add_task_periodic") == 0)
 			xCommand = commADDPD;
-		else if(strcmp(pcCommand, "commCWCET") == 0)
+		else if(strcmp(pcCommand, "recalculate_wcet") == 0)
 			xCommand = commCWCET;
 		else if(strcmp(pcCommand, "add_task") == 0)
 			xCommand = commADDAP;
@@ -160,7 +160,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 		}
 		else if(xCommand == commCWCET)
 		{
-			//Recalculate
+			vRecalculateWCET();
 		}
 		else if(xCommand == commSHWTC)
 		{
