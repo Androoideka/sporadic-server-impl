@@ -411,7 +411,7 @@ PRIVILEGED_DATA static TickStats_t * pxTickStats;
 /* Information stays written until this amount of ticks. Use a similar interval as your runtime read/write task. */
 PRIVILEGED_DATA static UBaseType_t uxStatSize;
 /* Array counter. */
-PRIVILEGED_DATA static UBaseType_t uxStatCounter = ( UBaseType_t ) 0U;
+PRIVILEGED_DATA static UBaseType_t uxStatCounter = -1;
 
 #if( INCLUDE_vTaskDelete == 1 )
 
@@ -444,8 +444,6 @@ PRIVILEGED_DATA static UBaseType_t uxTaskNumber 					= ( UBaseType_t ) 0U;
 PRIVILEGED_DATA static volatile TickType_t xNextTaskUnblockTime		= portMAX_DELAY; /* I don't see why they didn't just set portMAX_DELAY here so I did it myself. */
 PRIVILEGED_DATA static TaskHandle_t xIdleTaskHandle					= NULL;			/*< Holds the handle of the idle task.  The idle task is created automatically when the scheduler is started. */
 PRIVILEGED_DATA static BaseType_t xInitialOverflow                  = pdTRUE; /* In this Windows port, starting the scheduler takes a long time so IncrementTick is called before any task even starts execution. This is a workaround so we can start the ticks from -1 without it registering as an overflow at the start. */
-
-PRIVILEGED_DATA static double ufSchedulability;
 
 /* Context switches are held pending while the scheduler is suspended.  Also,
 interrupts must not manipulate the xStateListItem of a TCB, or any of the
@@ -638,7 +636,7 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB ) PRIVILEGED_FUNCTION;
  * Called to check schedulability of a batch and to allocate every
  * periodic task to a ready list.
  */
-static BaseType_t xPrepareBatch ( void ) PRIVILEGED_FUNCTION;
+static double xPrepareBatch ( void ) PRIVILEGED_FUNCTION;
 
 /*
  * Drop all tasks queued in the batch in case the batch is not schedulable.
@@ -1290,19 +1288,17 @@ static void prvAddNewTaskToList( TCB_t *pxNewTCB )
 }
 /*-----------------------------------------------------------*/
 
-static BaseType_t xPrepareBatch( void )
+static double xPrepareBatch( void )
 {
 UBaseType_t i, uxBatchSize = listCURRENT_LIST_LENGTH( &xBatchedTasksList );
 TCB_t *listPointer;
 TickType_t xMin = portMAX_DELAY, xMax = ( TickType_t ) 0U, pxMins[configMAX_PRIORITIES];
 UBaseType_t uxTopPriority = uxTopReadyPriority;
-double ufTaskProcUsage;
-
-	ufSchedulability = 1;
+double ufTaskProcUsage, ufSchedulability = 1;
 
 	if( uxBatchSize < ( UBaseType_t ) 1U )
 	{
-		return errQUEUE_EMPTY;
+		return 0;
 	}
 
 	/* In case there are garbage values in the array. */
@@ -1322,10 +1318,10 @@ double ufTaskProcUsage;
 		{
 			ufTaskProcUsage = ( double ) listPointer->xComputationTime / ( double ) listPointer->xPeriod;
 			ufTaskProcUsage++;
-			if( ufSchedulability * ufTaskProcUsage > 2 ) {
-				return errSCHEDULE_NOT_FEASIBLE;
-			}
 			ufSchedulability *= ufTaskProcUsage;
+			if( ufSchedulability > 2 ) {
+				return ufSchedulability;
+			}
 
 			listSET_LIST_ITEM_VALUE( &( listPointer->xStateListItem ), listPointer->xPeriod );
 			if( listPointer->xPeriod <= xMin )
@@ -1397,7 +1393,7 @@ double ufTaskProcUsage;
 		}
 	}
 
-	return pdPASS;
+	return ufSchedulability;
 }
 /*-----------------------------------------------------------*/
 
@@ -2304,37 +2300,45 @@ TCB_t *listPointer;
 
 BaseType_t xTaskCalcMaxServer( TickType_t * xCapacity, TickType_t xPeriod )
 {
-BaseType_t xReturn;
+double ufSchedulability;
 
 	if(xSchedulerRunning != pdFALSE) {
 		return errSCHEDULER_RUNNING;
 	}
 
-	xReturn = xPrepareBatch();
+	ufSchedulability = xPrepareBatch();
 
-	if( xReturn != pdPASS )
+	if( ufSchedulability == 0 )
 	{
-		return xReturn;
+		return errQUEUE_EMPTY;
+	}
+	else if( ufSchedulability > 2 )
+	{
+		return errSCHEDULE_NOT_FEASIBLE;
 	}
 	*xCapacity = ( TickType_t ) floor( ( 2 - ufSchedulability ) / ufSchedulability * xPeriod );
 
-	return xReturn;
+	return pdPASS;
 }
 /*-----------------------------------------------------------*/
 
 BaseType_t xTaskSetServer( TickType_t xCapacity, TickType_t xPeriod )
 {
-BaseType_t xReturn;
+double ufSchedulability;
 
 	if(xSchedulerRunning != pdFALSE) {
 		return errSCHEDULER_RUNNING;
 	}
 
-	xReturn = xPrepareBatch();
-	if( xReturn != pdPASS )
+	ufSchedulability = xPrepareBatch();
+	if( ufSchedulability == 0 )
+	{
+		return errQUEUE_EMPTY;
+	}
+	if( ufSchedulability > 2 )
 	{
 		prvDropBatch();
-		return xReturn;
+		return errSCHEDULE_NOT_FEASIBLE;
 	}
 
 	double serverUsage = ( double ) xCapacity / ( double ) xPeriod;
@@ -2366,16 +2370,14 @@ BaseType_t xReturn;
 	}
 
 	/* The Idle task is being created using dynamically allocated RAM. */
-	xReturn = xTaskCreate(	prvIdleTask,
-							configIDLE_TASK_NAME,
-							configMINIMAL_STACK_SIZE,
-							( void * ) NULL,
-							&xIdleTaskHandle,
-							( TickType_t ) 0U,
-							portMAX_DELAY, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
-							( TickType_t ) 0);
-
-	return xReturn;
+	return xTaskCreate(	prvIdleTask,
+			configIDLE_TASK_NAME,
+			configMINIMAL_STACK_SIZE,
+			( void * ) NULL,
+			&xIdleTaskHandle,
+			( TickType_t ) 0U,
+			portMAX_DELAY, /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+			( TickType_t ) 0);
 }
 /*-----------------------------------------------------------*/
 
@@ -2418,10 +2420,6 @@ void vTaskStartScheduler( TickStats_t * pxStatsArray, UBaseType_t uxGranularity 
 		/* Select a new task to run using either the generic C or port
 		optimised asm code. */
 		taskSELECT_HIGHEST_PRIORITY_TASK(); /*lint !e9079 void * is used as this macro is used with timers and co-routines too.  Alignment is known to be fine as the type of the pointer stored and retrieved is the same. */
-
-		pxTickStats[ uxStatCounter ].xTick = xTickCount;
-		pxTickStats[ uxStatCounter ].xHandle = ( TaskHandle_t ) pxCurrentTCB;
-		pxTickStats[ uxStatCounter ].xCapacity = xServerCapacity;
 	}
 	#endif /* configSUPPORT_STATIC_ALLOCATION */
 
@@ -3123,14 +3121,17 @@ BaseType_t xSwitchRequired = pdFALSE;
 			}
 		}
 
-		if( ++uxStatCounter >= uxStatSize )
+		if( pxTickStats != NULL )
 		{
-			uxStatCounter = ( UBaseType_t ) 0U;
+			if( ++uxStatCounter >= uxStatSize )
+			{
+				uxStatCounter = ( UBaseType_t ) 0U;
+			}
+			pxTickStats[ uxStatCounter ].xTick = xConstTickCount;
+			pxTickStats[ uxStatCounter ].xHandle = ( TaskHandle_t ) pxCurrentTCB;
+			pxTickStats[ uxStatCounter ].xCapacity = xServerCapacity;
+			pxTickStats[ uxStatCounter ].xMarker = pdFALSE;
 		}
-		pxTickStats[ uxStatCounter ].xTick = xConstTickCount;
-		pxTickStats[ uxStatCounter ].xHandle = ( TaskHandle_t ) pxCurrentTCB;
-		pxTickStats[ uxStatCounter ].xCapacity = xServerCapacity;
-		pxTickStats[ uxStatCounter ].xMarker = pdFALSE;
 
 		/* If an aperiodic task is currently using the server,
 		queue more capacity to be refilled. */
@@ -3229,7 +3230,10 @@ BaseType_t xSwitchRequired = pdFALSE;
 					}
 					else
 					{
-						pxTickStats[ uxStatCounter ].xMarker = pdTRUE;
+						if( pxTickStats != NULL )
+						{
+							pxTickStats[ uxStatCounter ].xMarker = pdTRUE;
+						}
 						listSET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ), pxTCB->xPeriod );
 						/* Place the unblocked task into the appropriate ready
 						list. */

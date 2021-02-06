@@ -11,15 +11,14 @@
 /* Custom includes. */
 #include "function.h"
 
-#define configGRANULARITY   200
-
 #define commCWCET     ( BaseType_t ) 0
 #define commADDPD     ( BaseType_t ) 1
 #define commADDAP     ( BaseType_t ) 2
 #define commSHWTC     ( BaseType_t ) 3
 #define commREMOV     ( BaseType_t ) 4
-#define commSCHCK     ( BaseType_t ) 5
-#define commSINIT     ( BaseType_t ) 6
+#define commSTATS     ( BaseType_t ) 5
+#define commSCHCK     ( BaseType_t ) 6
+#define commSINIT     ( BaseType_t ) 7
 
 #define COMMAND_SIZE        17
 
@@ -77,6 +76,38 @@ static void exception_handler(BaseType_t xError, FILE *file)
 	fflush(file);
 }
 
+static TickStats_t * pxTickStats = NULL;
+static TickType_t xStatGranularity = (TickType_t) 0U;
+
+static void vWriteStatsTask(void *pvParams)
+{
+	FILE *statFile;
+	statFile = fopen("log.txt", "w");
+
+	if (statFile == NULL)
+	{
+		printf("Error while opening file\n");
+		fflush(stdout);
+		return;
+	}
+
+	taskENTER_CRITICAL();
+	{
+		for( UBaseType_t i = ( UBaseType_t ) 0U; i < (UBaseType_t) xStatGranularity * 2; i++ )
+		{
+			if(pxTickStats[i].xHandle == NULL)
+			{
+				break;
+			}
+			fprintf(statFile, "%u %p %u %ld\n", pxTickStats[i].xTick, pxTickStats[i].xHandle, pxTickStats[i].xCapacity, pxTickStats[i].xMarker);
+		}
+	}
+	taskEXIT_CRITICAL();
+
+	fclose(statFile);
+	vTaskDelete(0);
+}
+
 static void input_handler(FILE *readFile, FILE *writeFile) {
 	for(;;)
 	{
@@ -96,6 +127,8 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 			xCommand = commSHWTC;
 		else if(strcmp(pcCommand, "stop_task") == 0)
 			xCommand = commREMOV;
+		else if(strcmp(pcCommand, "configure_stats") == 0)
+			xCommand = commSTATS;
 		else if(strcmp(pcCommand, "get_max_server_capacity") == 0)
 			xCommand = commSCHCK;
 		else if(strcmp(pcCommand, "initialise_server") == 0)
@@ -150,7 +183,7 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 						{
 							xError = xTaskCreate(pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, &xHandle, xArrivalTime, xPeriod, xComputationTime);
 						}
-						if( xError == pdPASS )
+						if(xError == pdPASS)
 						{
 							fprintf(writeFile, "Handle: %p, Arrival: %u\n", xHandle, xArrivalTime);
 						}
@@ -183,6 +216,30 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 				if(xHandle != 0)
 				{
 					vTaskDelete(xHandle);
+				}
+			}
+		}
+		else if(xCommand == commSTATS && xStatGranularity == (BaseType_t) 0)
+		{
+			TaskHandle_t xHandle;
+			if(fscanf(readFile, "%u", &xStatGranularity) != 1)
+			{
+				xError = errMISSINGPARAM;
+			}
+			else if(xStatGranularity == (TickType_t) 0U)
+			{
+				xError = errBADINPUT;
+			}
+			else
+			{
+				xError = xTaskCreate(vWriteStatsTask, "statwriter", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, xStatGranularity, 1);
+				if(xError == pdPASS)
+				{
+					fprintf(writeFile, "Handle: %p, Arrival: %u\n", xHandle, 0U);
+				}
+				else
+				{
+					xStatGranularity = (TickType_t) 0U;
 				}
 			}
 		}
@@ -221,41 +278,14 @@ static void input_handler(FILE *readFile, FILE *writeFile) {
 					fflush(writeFile);
 					return;
 				}
+				else if(xError == errSCHEDULE_NOT_FEASIBLE)
+				{
+					xStatGranularity = (TickType_t) 0U;
+				}
 			}
 		}
 		exception_handler(xError, writeFile);
 	}
-}
-
-static TickStats_t pxTickStats[configGRANULARITY];
-
-static void vWriteStatsTask(void *pvParams)
-{
-	FILE *statFile;
-	statFile = fopen("log.txt", "w");
-
-	if (statFile == NULL)
-	{
-		printf("Error while opening file\n");
-		fflush(stdout);
-		return;
-	}
-
-	taskENTER_CRITICAL();
-	{
-		for( UBaseType_t i = ( UBaseType_t ) 0U; i < configGRANULARITY; i++ )
-		{
-			if(pxTickStats[i].xHandle == NULL)
-			{
-				break;
-			}
-			fprintf(statFile, "%u %p %u %ld\n", pxTickStats[i].xTick, pxTickStats[i].xHandle, pxTickStats[i].xCapacity, pxTickStats[i].xMarker);
-		}
-	}
-	taskEXIT_CRITICAL();
-
-	fclose(statFile);
-	vTaskDelete(0);
 }
 
 int main( void )
@@ -266,18 +296,17 @@ int main( void )
 	FILE *readFile = stdin;
 	FILE *writeFile = stderr;
 
-	/* Stat writing */
-	BaseType_t xError = pdPASS;
-	TaskHandle_t xHandle;
-	xError = xTaskCreate(vWriteStatsTask, "stat", configMINIMAL_STACK_SIZE, NULL, &xHandle, 0, configGRANULARITY / 2, 1);
-	if( xError == pdPASS )
-	{
-		fprintf(writeFile, "Handle: %p, Arrival: %u\n", xHandle, 0U);
-		fflush(writeFile);
-	}
-
 	input_handler(readFile, writeFile);
-	vTaskStartScheduler(pxTickStats, configGRANULARITY);
+	if(xStatGranularity == (TickType_t) 0U)
+	{
+		vTaskStartScheduler(NULL, (TickType_t) 0U);
+	}
+	else
+	{
+		TickStats_t pxStatsArray[(UBaseType_t) xStatGranularity * 2];
+		pxTickStats = pxStatsArray;
+		vTaskStartScheduler(pxStatsArray, (UBaseType_t) xStatGranularity * 2);
+	}
 
 	return 0;
 
