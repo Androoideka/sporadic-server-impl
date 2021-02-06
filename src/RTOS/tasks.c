@@ -3193,6 +3193,11 @@ BaseType_t xSwitchRequired = pdFALSE;
 						mtCOVERAGE_TEST_MARKER();
 					}
 
+					if( pxTCB == pxCurrentTCB && pxTCB->xStackInitRequired )
+					{
+						break;
+					}
+
 					/* It is time to remove the item from the Blocked state. */
 					( void ) uxListRemove( &( pxTCB->xStateListItem ) );
 
@@ -3253,6 +3258,13 @@ BaseType_t xSwitchRequired = pdFALSE;
 					#endif /* configUSE_PREEMPTION */
 				}
 			}
+		}
+
+		if( pxCurrentTCB->xStackInitRequired )
+		{
+			xSwitchRequired = pdTRUE;
+			pxTCB = listGET_OWNER_OF_HEAD_ENTRY( pxDelayedTaskList );
+			xNextTaskUnblockTime = listGET_LIST_ITEM_VALUE( &( pxTCB->xStateListItem ) );
 		}
 
 		/* Tasks of equal priority to the currently running task will share
