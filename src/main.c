@@ -77,7 +77,7 @@ static void exception_handler( BaseType_t xError, FILE *file )
 }
 
 static TickStats_t * pxTickStats = NULL;
-static TickType_t xStatGranularity = (TickType_t) 0U;
+static TickType_t xStatGranularity = ( TickType_t ) 0U;
 
 static void vWriteStatsTask( void *pvParams )
 {
@@ -152,7 +152,7 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 			}
 			else
 			{
-				TaskCode_t *pxTaskCode = pxFindTaskCode(pcFuncName);
+				TaskCode_t *pxTaskCode = pxFindTaskCode( pcFuncName );
 				if ( pxTaskCode == NULL )
 				{
 					xError = errNOTFOUND;
@@ -162,8 +162,8 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 					void ( *pfFunc )( void* pvParams ) = pxTaskCode->pfFunc;
 					TickType_t xComputationTime = pxTaskCode->xComputationTime;
 					TickType_t xArrivalTime = xTaskGetTickCount();
-					TickType_t xPeriod = (TickType_t) 0U;
-					TickType_t xOffset = (TickType_t) 0U;
+					TickType_t xPeriod = ( TickType_t ) 0U;
+					TickType_t xOffset = ( TickType_t ) 0U;
 					if( xCommand == commADDPD && fscanf( readFile, "%u", &xPeriod ) != 1 )
 					{
 						xError = errMISSINGPARAM;
@@ -174,18 +174,22 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 					}
 					else
 					{
-						xArrivalTime += xOffset;
-						if( strcmp( pvParams, "NULL" ) == 0 )
+						if( xCommand == commADDPD && xPeriod == ( TickType_t ) 0U )
 						{
-							xError = xTaskCreate( pfFunc, pcName, configMINIMAL_STACK_SIZE, NULL, &xHandle, xArrivalTime, xPeriod, xComputationTime );
+							xError = errBADINPUT;
 						}
 						else
 						{
+							xArrivalTime += xOffset;
+							if( strcmp( pvParams, "NULL" ) == 0 )
+							{
+								pvParams = NULL;
+							}
 							xError = xTaskCreate( pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, &xHandle, xArrivalTime, xPeriod, xComputationTime );
-						}
-						if( xError == pdPASS )
-						{
-							fprintf( writeFile, "Handle: %p, Arrival: %u\n", xHandle, xArrivalTime );
+							if( xError == pdPASS )
+							{
+								fprintf( writeFile, "Handle: %p, Arrival: %u\n", xHandle, xArrivalTime );
+							}
 						}
 					}
 				}
@@ -219,14 +223,14 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 				}
 			}
 		}
-		else if( xCommand == commSTATS && xStatGranularity == (TickType_t) 0U )
+		else if( xCommand == commSTATS && xStatGranularity == ( TickType_t ) 0U )
 		{
 			TaskHandle_t xHandle;
 			if( fscanf( readFile, "%u", &xStatGranularity ) != 1 )
 			{
 				xError = errMISSINGPARAM;
 			}
-			else if( xStatGranularity == (TickType_t) 0U )
+			else if( xStatGranularity == ( TickType_t ) 0U )
 			{
 				xError = errBADINPUT;
 			}
@@ -239,7 +243,7 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 				}
 				else
 				{
-					xStatGranularity = (TickType_t) 0U;
+					xStatGranularity = ( TickType_t ) 0U;
 				}
 			}
 		}
@@ -251,6 +255,10 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 			if( fscanf( readFile, "%u", &xPeriod ) != 1 )
 			{
 				xError = errMISSINGPARAM;
+			}
+			else if( xPeriod == ( TickType_t ) 0U )
+			{
+				xError = errBADINPUT;
 			}
 			else
 			{
@@ -270,6 +278,10 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 			{
 				xError = errMISSINGPARAM;
 			}
+			else if( xPeriod == ( TickType_t ) 0U )
+			{
+				xError = errBADINPUT;
+			}
 			else
 			{
 				xError = xTaskSetServer( xCapacity, xPeriod );
@@ -280,7 +292,7 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 				}
 				else if( xError == errSCHEDULE_NOT_FEASIBLE )
 				{
-					xStatGranularity = (TickType_t) 0U;
+					xStatGranularity = ( TickType_t ) 0U;
 				}
 			}
 		}
@@ -297,15 +309,15 @@ int main( void )
 	FILE *writeFile = stderr;
 
 	input_handler( readFile, writeFile );
-	if( xStatGranularity == (TickType_t) 0U )
+	if( xStatGranularity == ( TickType_t ) 0U )
 	{
 		vTaskStartScheduler( NULL, xStatGranularity );
 	}
 	else
 	{
-		TickStats_t pxStatsArray[ (UBaseType_t) xStatGranularity * 2 ];
+		TickStats_t pxStatsArray[ ( UBaseType_t ) xStatGranularity * 2 ];
 		pxTickStats = pxStatsArray;
-		vTaskStartScheduler( pxStatsArray, (UBaseType_t) xStatGranularity * 2 );
+		vTaskStartScheduler( pxStatsArray, ( UBaseType_t ) xStatGranularity * 2 );
 	}
 	return 0;
 
