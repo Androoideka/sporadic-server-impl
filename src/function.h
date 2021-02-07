@@ -13,12 +13,12 @@
 typedef struct xTaskCode
 {
 	const char* pcName;
-	void (*pfFunc)(void* pvParams);
+	void ( *pfFunc )( void* pvParams );
 	TickType_t xComputationTime;
 } TaskCode_t;
 
 void vRecalculateWCET();
 
-TaskCode_t *pxGetTaskCodes(TaskCode_t xInput, BaseType_t *pxCount);
+TaskCode_t *pxGetTaskCodes( TaskCode_t xInput, UBaseType_t *pxCount );
 
 #endif /* FUNCTION_H_ */
