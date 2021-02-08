@@ -10,7 +10,7 @@ The sporadic server is a proof of concept but most of the changes were done in t
 -Submitting tasks in a batch <br/>
 -Queueing aperiodic tasks whose arrival times are further ahead <br/>
 
-Configuring the simulated real-time environment is done through the command line. A GUI for setting up the environment is implemented in the repository <a href="https://github.com/Androoideka/Sporadic-Server-Batcher">Sporadic Server Batcher<a/> and includes a visual representation of actions the system is taking each tick. You can also operate the system manually using these commands:
+Configuring the simulated real-time environment is done through the command line. A GUI for setting up the environment is implemented in the <a href="https://github.com/Androoideka/Sporadic-Server-Batcher">Sporadic Server Batcher repository<a/> and includes a visual representation of actions the system is taking each tick. You can also operate the system manually using these commands:
 
 add_task |name| |function| |function parameters| |arrival offset| - adds an aperiodic task to the batch with the given attributes <br/>
 add_task_periodic |name| |function| |function parameters| |period| - adds a periodic task to the batch with the given attributes <br/>
