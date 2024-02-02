@@ -139,20 +139,21 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 		if( xCommand == commADDPD || xCommand == commADDAP ) {
 			char pcName[ configMAX_TASK_NAME_LEN ];
 			char pcFuncName[ FUNC_NAME_SIZE ];
-			char pvParams[ configMAX_PARAM_LEN ];
+			char pcParams[ configMAX_PARAM_LEN ];
 			TaskHandle_t xHandle;
 
-			if( fscanf( readFile, "%s %s %s", pcName, pcFuncName, pvParams ) != 3 )
+			if( fscanf( readFile, "%s %s %s", pcName, pcFuncName, pcParams ) != 3 )
 			{
 				xError = errMISSINGPARAM;
 			}
-			else if( strlen( pcName ) >= configMAX_TASK_NAME_LEN || strlen( pcFuncName ) >= FUNC_NAME_SIZE || strlen( pvParams ) >= configMAX_PARAM_LEN )
+			else if( strlen( pcName ) >= configMAX_TASK_NAME_LEN || strlen( pcFuncName ) >= FUNC_NAME_SIZE || strlen( pcParams ) >= configMAX_PARAM_LEN )
 			{
 				xError = errBADINPUT;
 			}
 			else
 			{
 				TaskCode_t *pxTaskCode = pxFindTaskCode( pcFuncName );
+				void *pvParams = NULL;
 				if ( pxTaskCode == NULL )
 				{
 					xError = errNOTFOUND;
@@ -181,9 +182,9 @@ static void input_handler( FILE *readFile, FILE *writeFile ) {
 						else
 						{
 							xArrivalTime += xOffset;
-							if( strcmp( pvParams, "NULL" ) == 0 )
+							if( strcmp( pcParams, "NULL" ) != 0 )
 							{
-								pvParams = NULL;
+								pvParams = pcParams;
 							}
 							xError = xTaskCreate( pfFunc, pcName, configMINIMAL_STACK_SIZE, pvParams, &xHandle, xArrivalTime, xPeriod, xComputationTime );
 							if( xError == pdPASS )
